@@ -1042,6 +1042,9 @@ function renderDraftRevealScreen() {
     container.className = 'glass-panel';
     container.style.textAlign = 'center';
 
+    // Initialize lotteryResults if not present
+    if (!GameState.lotteryResults) GameState.lotteryResults = {};
+
     let roundText = `第${GameState.currentRound}巡選択希望選手`;
     if (GameState.currentSubRound > 1) {
         roundText += ` (外れ${GameState.currentSubRound - 1})`;
@@ -1070,6 +1073,7 @@ function renderDraftRevealScreen() {
     const targetGroups = {}; 
     for (const pIndex of GameState.playersToDraftThisRound) {
         const selectedPlayer = GameState.currentSelections[pIndex];
+        if (!selectedPlayer) continue;
         if (!targetGroups[selectedPlayer.id]) {
             targetGroups[selectedPlayer.id] = { playerObj: selectedPlayer, nominatorIndices: [] };
         }
@@ -1079,6 +1083,7 @@ function renderDraftRevealScreen() {
     // Render cards initially face down or immediately up
     GameState.playersToDraftThisRound.forEach(pIndex => {
         const selectedPlayer = GameState.currentSelections[pIndex];
+        if (!selectedPlayer) return;
         const card = document.createElement('div');
         card.className = 'reveal-card reveal-card-pop';
         card.innerHTML = `
@@ -1097,8 +1102,10 @@ function renderDraftRevealScreen() {
     async function processDraft() {
         singles.forEach(group => {
             const winnerIndex = group.nominatorIndices[0];
-            GameState.rosters[winnerIndex].push(group.playerObj);
-            GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+            if (!GameState.rosters[winnerIndex].some(p => p && p.id === group.playerObj.id)) {
+                GameState.rosters[winnerIndex].push(group.playerObj);
+                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+            }
         });
 
         if (duplicates.length === 0) {
@@ -1126,30 +1133,46 @@ function renderDraftRevealScreen() {
             lotteryBox.style.border = '1px solid var(--warning-color)';
             
             const participantsText = group.nominatorIndices.map(i => GameState.playerNames[i]).join('、');
+            const existingResult = GameState.lotteryResults[group.playerObj.id];
             
             lotteryBox.innerHTML = `
                 <h4 style="font-size: 1.5rem; margin-bottom: 0.5rem;">${group.playerObj.name} の抽選</h4>
-                <p style="margin-bottom: 1rem; color: var(--text-secondary);">${participantsText}</p>
+                <p style="margin-bottom: 1rem; color: var(--text-secondary);">競合: ${participantsText}</p>
                 <div id="lottery-result-${group.playerObj.id}" style="font-size: 2rem; font-weight: bold; min-height: 3rem;"></div>
-                <button id="draw-btn-${group.playerObj.id}" class="btn btn-primary">抽選スタート</button>
+                ${(!isOnline || isHost) && !existingResult ? '<button id="draw-btn-' + group.playerObj.id + '" class="btn btn-primary">抽選スタート</button>' : ''}
             `;
             
             lotteryArea.appendChild(lotteryBox);
+            const resultBox = document.getElementById('lottery-result-' + group.playerObj.id);
 
-            const drawBtn = document.getElementById(`draw-btn-${group.playerObj.id}`);
-            const resultBox = document.getElementById(`lottery-result-${group.playerObj.id}`);
-
-            if (isOnline && !isHost) {
-                drawBtn.style.display = 'none';
-                resultBox.innerHTML = '<span style="color:var(--text-secondary); font-size:1.25rem;">抽選中...ホストからの結果をお待ちください</span>';
+            // If result already exists (guest re-rendered after host broadcast)
+            if (existingResult) {
+                const winnerName = GameState.playerNames[existingResult.winnerIndex];
+                resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + winnerName + '</span>';
+                if (!GameState.rosters[existingResult.winnerIndex].some(p => p && p.id === group.playerObj.id)) {
+                    GameState.rosters[existingResult.winnerIndex].push(group.playerObj);
+                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                }
+                group.nominatorIndices.forEach(idx => {
+                    if (idx !== existingResult.winnerIndex) losers.push(idx);
+                });
+                resolve();
                 return;
             }
 
+            // Guest: show waiting message, don't resolve (will re-render on next poll)
+            if (isOnline && !isHost) {
+                resultBox.innerHTML = '<span style="color:var(--text-secondary); font-size:1.25rem;">ホストが抽選中...しばらくお待ちください 🎲</span>';
+                return;
+            }
+
+            // Host: show draw button
+            const drawBtn = document.getElementById('draw-btn-' + group.playerObj.id);
             drawBtn.addEventListener('click', () => {
                 drawBtn.style.display = 'none';
                 
                 let ticks = 0;
-                const interval = setInterval(() => {
+                const interval = setInterval(async () => {
                     const randomNominator = group.nominatorIndices[Math.floor(Math.random() * group.nominatorIndices.length)];
                     resultBox.textContent = GameState.playerNames[randomNominator];
                     ticks++;
@@ -1158,15 +1181,21 @@ function renderDraftRevealScreen() {
                         clearInterval(interval);
                         const winnerIndex = group.nominatorIndices[Math.floor(Math.random() * group.nominatorIndices.length)];
                         
-                        resultBox.innerHTML = `<span style="color:var(--success-color)">交渉権獲得: ${GameState.playerNames[winnerIndex]}</span>`;
+                        resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + GameState.playerNames[winnerIndex] + '</span>';
                         resultBox.classList.add('lottery-winner-anim');
                         
                         GameState.rosters[winnerIndex].push(group.playerObj);
                         GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
                         
+                        // Save lottery result so guests can see it
+                        GameState.lotteryResults[group.playerObj.id] = { winnerIndex: winnerIndex };
+                        
                         group.nominatorIndices.forEach(idx => {
                             if (idx !== winnerIndex) losers.push(idx);
                         });
+                        
+                        // Broadcast after each lottery so guests see results
+                        if (isOnline && isHost) await broadcastState();
                         
                         setTimeout(resolve, 1000);
                     }
@@ -1177,10 +1206,17 @@ function renderDraftRevealScreen() {
     }
 
     function showProceedButton() {
-        if (isOnline && !isHost) return;
+        if (isOnline && !isHost) {
+            proceedBtn.style.display = 'block';
+            proceedBtn.disabled = true;
+            proceedBtn.textContent = 'ホストが次に進むのをお待ちください...';
+            proceedBtn.style.opacity = '0.5';
+            return;
+        }
         proceedBtn.style.display = 'block';
         proceedBtn.onclick = async () => {
             saveState();
+            GameState.lotteryResults = {};
             if (losers.length > 0) {
                 GameState.playersToDraftThisRound = losers;
                 GameState.currentSubRound++;
