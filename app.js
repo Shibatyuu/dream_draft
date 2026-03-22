@@ -322,9 +322,10 @@ function renderConnectionScreen() {
             myPlayerName = hname;
             GameState.playerNames[0] = hname;
             GameState.numPlayers = 1;
+            const initState = { phase: GameState.phase, numPlayers: GameState.numPlayers, playerNames: GameState.playerNames, numRounds: GameState.numRounds };
             const res = await fetch(SERVER_URL + '?path=/create', {
                 method: 'POST',
-                body: JSON.stringify({ state: GameState })
+                body: JSON.stringify({ state: initState })
             });
             const data = await res.json();
             
@@ -438,12 +439,38 @@ function startHostPolling() {
 async function broadcastState() {
     if (!isHost || !isOnline) return;
     try {
+        // Send lightweight state: exclude csvData and availablePlayers
+        const lightState = {};
+        for (const key of Object.keys(GameState)) {
+            if (key === 'csvData') continue; // never send
+            if (key === 'availablePlayers') {
+                // Send only IDs of available players
+                lightState.availablePlayerIds = GameState.availablePlayers.map(p => p.id);
+                continue;
+            }
+            if (key === 'rosters') {
+                // Send only IDs for rosters
+                lightState.rosterIds = GameState.rosters.map(roster => roster.map(p => p ? p.id : null));
+                continue;
+            }
+            if (key === 'currentSelections') {
+                // Send only IDs for current selections
+                const selIds = {};
+                for (const k of Object.keys(GameState.currentSelections)) {
+                    const sel = GameState.currentSelections[k];
+                    selIds[k] = sel ? sel.id : null;
+                }
+                lightState.currentSelectionIds = selIds;
+                continue;
+            }
+            lightState[key] = GameState[key];
+        }
         await fetch(SERVER_URL + '?path=/update', {
             method: 'POST',
-            body: JSON.stringify({ room_id: roomId, client_id: clientId, state: GameState })
+            body: JSON.stringify({ room_id: roomId, client_id: clientId, state: lightState })
         });
         lastVersion++;
-    } catch(e) {}
+    } catch(e) { console.error('broadcastState error', e); }
 }
 
 async function sendClientAction(actionObj) {
@@ -456,6 +483,11 @@ async function sendClientAction(actionObj) {
     } catch(e) {}
 }
 
+function findPlayerById(id) {
+    if (!id) return null;
+    return GameState.csvData.find(p => p.id === id) || null;
+}
+
 function startClientPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
@@ -465,8 +497,39 @@ function startClientPolling() {
                 const data = await res.json();
                 if (data.version > lastVersion) {
                     lastVersion = data.version;
-                    Object.assign(GameState, data.state);
-                    if (GameState.csvData && GameState.csvData.length > 0 && (!GlobalTags.ceLeagueTeams || GlobalTags.ceLeagueTeams.length === 0)) {
+                    const serverState = data.state;
+                    
+                    // Ensure local embedded data is loaded
+                    if (!GameState.csvData || GameState.csvData.length === 0) {
+                        loadEmbeddedData();
+                    }
+                    
+                    // Merge lightweight server state back into full local state
+                    // Restore availablePlayers from IDs
+                    if (serverState.availablePlayerIds) {
+                        const idSet = new Set(serverState.availablePlayerIds);
+                        GameState.availablePlayers = GameState.csvData.filter(p => idSet.has(p.id));
+                    }
+                    // Restore rosters from IDs
+                    if (serverState.rosterIds) {
+                        GameState.rosters = serverState.rosterIds.map(roster => roster.map(id => findPlayerById(id)));
+                    }
+                    // Restore currentSelections from IDs
+                    if (serverState.currentSelectionIds) {
+                        GameState.currentSelections = {};
+                        for (const k of Object.keys(serverState.currentSelectionIds)) {
+                            GameState.currentSelections[k] = findPlayerById(serverState.currentSelectionIds[k]);
+                        }
+                    }
+                    // Copy other simple fields
+                    const skipKeys = new Set(['availablePlayerIds', 'rosterIds', 'currentSelectionIds', 'csvData', 'availablePlayers', 'rosters', 'currentSelections']);
+                    for (const key of Object.keys(serverState)) {
+                        if (!skipKeys.has(key)) {
+                            GameState[key] = serverState[key];
+                        }
+                    }
+                    
+                    if (!GlobalTags.ceLeagueTeams || GlobalTags.ceLeagueTeams.length === 0) {
                         reconstructGlobalTags();
                     }
                     render();
@@ -506,10 +569,30 @@ function reconstructGlobalTags() {
     GlobalTags.teams = [...GlobalTags.ceLeagueTeams, ...GlobalTags.paLeagueTeams, ...GlobalTags.otherTeams];
 }
 
+function loadEmbeddedData() {
+    if (typeof EMBEDDED_PLAYERS === 'undefined' || !EMBEDDED_PLAYERS) return;
+    GameState.csvData = EMBEDDED_PLAYERS.map((p, idx) => ({
+        id: p.id,
+        originalId: idx,
+        name: p.name,
+        team: p.team || '-',
+        position: p.position || '-',
+        salary: p.salary || 0,
+        age: p.age || 0
+    }));
+    GameState.availablePlayers = [...GameState.csvData];
+    reconstructGlobalTags();
+}
+
 function renderSetupScreen() {
     appContainer.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'glass-panel setup-screen';
+
+    // Auto-load embedded data if not already loaded
+    if (!GameState.csvData || GameState.csvData.length === 0) {
+        loadEmbeddedData();
+    }
 
     if (isOnline && !isHost) {
         container.innerHTML = `
@@ -529,6 +612,8 @@ function renderSetupScreen() {
         return;
     }
     
+    const dataLoaded = GameState.csvData && GameState.csvData.length > 0;
+
     container.innerHTML = `
         <h2 style="text-align:center; margin-bottom: 2rem; font-family: var(--font-display); font-size: 2rem;">${isOnline ? 'ROOM: ' + roomId : 'GAME SETUP'}</h2>
         
@@ -562,18 +647,13 @@ function renderSetupScreen() {
         </div>
 
         <div class="form-group">
-            <label class="form-label">選手データ (CSV)</label>
-            <div class="file-upload-wrapper">
-                <div class="file-upload-button">
-                    <span id="file-name-display">CSVファイルを選択（必須）</span>
-                </div>
-                <input type="file" id="csv-upload" class="file-upload-input" accept=".csv">
+            <div style="padding:0.75rem; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:0.5rem; color:var(--success-color); font-size:0.9rem;">
+                ✅ 選手データ読み込み済み（${dataLoaded ? GameState.csvData.length + '人' : '未読込'}）
             </div>
-            <div id="csv-status" class="status-message"></div>
         </div>
         
         <div class="setup-actions">
-            <button id="start-btn" class="btn btn-primary" ${GameState.availablePlayers.length === 0 ? 'disabled' : ''} style="width: 100%; font-size: 1.25rem;">ドラフトを開始する</button>
+            <button id="start-btn" class="btn btn-primary" ${!dataLoaded ? 'disabled' : ''} style="width: 100%; font-size: 1.25rem;">ドラフトを開始する</button>
         </div>
     `;
     
@@ -609,12 +689,6 @@ function renderSetupScreen() {
     document.getElementById('num-rounds-input').addEventListener('change', (e) => {
         GameState.numRounds = parseInt(e.target.value, 10) || 5;
         if (isOnline && isHost) broadcastState();
-    });
-
-    document.getElementById('csv-upload').addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            handleCSVUpload(e.target.files[0]);
-        }
     });
 
     document.getElementById('start-btn').addEventListener('click', async () => {
