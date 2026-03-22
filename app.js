@@ -362,6 +362,30 @@ function renderConnectionScreen() {
         statusEl.textContent = 'ルームに接続中...（数秒かかります）';
         statusEl.className = 'status-message';
         try {
+            // First, fetch the room state to validate if the player can join
+            const checkRes = await fetch(SERVER_URL + '?path=/room&room_id=' + jId);
+            if (!checkRes.ok) throw new Error("Fetch failed");
+            const checkData = await checkRes.json();
+            
+            if (!checkData.state || Object.keys(checkData.state).length === 0) {
+                statusEl.textContent = 'ルームが見つかりません。';
+                statusEl.className = 'status-message status-error';
+                return;
+            }
+
+            const currentState = checkData.state;
+            const isOngoing = currentState.phase && currentState.phase !== 'setup' && currentState.phase !== 'connection';
+            
+            if (isOngoing) {
+                // If game is ongoing, the name MUST be already in the participant list
+                const names = currentState.playerNames || [];
+                if (!names.includes(jName)) {
+                    statusEl.textContent = 'ルームIDか名前が違います（進行中のゲームには未登録の名前で参加できません）';
+                    statusEl.className = 'status-message status-error';
+                    return;
+                }
+            }
+
             const res = await fetch(SERVER_URL + '?path=/action', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -377,7 +401,7 @@ function renderConnectionScreen() {
                 roomId = jId;
                 startClientPolling();
             } else {
-                statusEl.textContent = 'ルームが見つかりません。';
+                statusEl.textContent = 'ルームに参加できませんでした。';
                 statusEl.className = 'status-message status-error';
             }
         } catch (e) {
@@ -742,9 +766,36 @@ function renderDraftInputIntermission() {
         container.innerHTML = `
             <h2 style="font-size: 2.5rem; margin-bottom: 1rem;"><span style="color:var(--accent-color)">${playerName}</span> さんが指名中...</h2>
             <p style="color:var(--text-secondary); margin-bottom: 2rem; font-size: 1.25rem;">${roundText}</p>
-            <p style="color: var(--text-secondary);">しばらくお待ちください。</p>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem;">しばらくお待ちください。</p>
+            ${isHost ? `
+            <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid var(--border-color);">
+                <p style="font-size:0.9rem; color:var(--warning-color); margin-bottom:1rem;">（ホスト専用：プレイヤーが不在の場合は以下から強制的にパスさせることができます）</p>
+                <button id="force-skip-btn" class="btn btn-warning-outline">強制的にパス（スキップ）させる</button>
+            </div>
+            ` : ''}
         `;
         appContainer.appendChild(container);
+        
+        if (isHost) {
+            document.getElementById('force-skip-btn').addEventListener('click', async () => {
+                if (confirm(`${playerName} さんをスキップ（パス）させますか？\nこの回の指名は「未指名」として処理されます。`)) {
+                    saveState();
+                    GameState.currentSelections[currentPlayerIndex] = { 
+                        id: 'skip-' + Date.now(), 
+                        name: '（選択パス）', 
+                        team: '（なし）', 
+                        position: '（なし）', 
+                        isSkip: true 
+                    };
+                    GameState.currentPlayerTurnIndex++;
+                    if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
+                        GameState.phase = 'draft_reveal';
+                    }
+                    await broadcastState();
+                    render();
+                }
+            });
+        }
     } else {
         container.innerHTML = `
             <h2 style="font-size: 2.5rem; margin-bottom: 1rem;">次は <span style="color:var(--accent-color)">${playerName}</span> さんの番です</h2>
@@ -1086,11 +1137,21 @@ function renderDraftRevealScreen() {
         if (!selectedPlayer) return;
         const card = document.createElement('div');
         card.className = 'reveal-card reveal-card-pop';
-        card.innerHTML = `
-            <div class="nominator-name">${GameState.playerNames[pIndex]}</div>
-            <div class="nominated-player-name">${selectedPlayer.name}</div>
-            <div class="nominated-player-team">${selectedPlayer.team} - ${selectedPlayer.position}</div>
-        `;
+        if (selectedPlayer.isSkip) {
+            card.style.opacity = '0.6';
+            card.style.borderStyle = 'dashed';
+            card.innerHTML = `
+                <div class="nominator-name">${GameState.playerNames[pIndex]}</div>
+                <div class="nominated-player-name" style="color:var(--text-secondary)">${selectedPlayer.name}</div>
+                <div class="nominated-player-team">PASS</div>
+            `;
+        } else {
+            card.innerHTML = `
+                <div class="nominator-name">${GameState.playerNames[pIndex]}</div>
+                <div class="nominated-player-name">${selectedPlayer.name}</div>
+                <div class="nominated-player-team">${selectedPlayer.team} - ${selectedPlayer.position}</div>
+            `;
+        }
         revealGrid.appendChild(card);
     });
 
@@ -1104,7 +1165,9 @@ function renderDraftRevealScreen() {
             const winnerIndex = group.nominatorIndices[0];
             if (!GameState.rosters[winnerIndex].some(p => p && p.id === group.playerObj.id)) {
                 GameState.rosters[winnerIndex].push(group.playerObj);
-                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                if (!group.playerObj.isSkip) {
+                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                }
             }
         });
 
@@ -1119,6 +1182,17 @@ function renderDraftRevealScreen() {
         for (const group of duplicates) {
             await runLotteryForGroup(group);
         }
+
+        // Safety Alignment: Ensure EVERY player in this sub-round got an entry in their roster
+        // (Even if they somehow didn't pick or weren't in a group, which shouldn't happen with the Skip button)
+        const roundNum = GameState.rosters[0].length; // Expecting current round count to be same for all
+        GameState.playersToDraftThisRound.forEach(pIdx => {
+             // If a player's roster is shorter than others, they missed a pick this sub-round
+             if (GameState.rosters[pIdx].length < roundNum) {
+                 // Note: This shouldn't normally hit if Skip button is used, but it prevents 'shifting'
+                 GameState.rosters[pIdx].push({ name: '（未指名）', isSkip: true, team: '-', position: '-' });
+             }
+        });
 
         showProceedButton();
     }
@@ -1151,7 +1225,9 @@ function renderDraftRevealScreen() {
                 resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + winnerName + '</span>';
                 if (!GameState.rosters[existingResult.winnerIndex].some(p => p && p.id === group.playerObj.id)) {
                     GameState.rosters[existingResult.winnerIndex].push(group.playerObj);
-                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                    if (!group.playerObj.isSkip) {
+                        GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                    }
                 }
                 group.nominatorIndices.forEach(idx => {
                     if (idx !== existingResult.winnerIndex) losers.push(idx);
@@ -1184,8 +1260,12 @@ function renderDraftRevealScreen() {
                         resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + GameState.playerNames[winnerIndex] + '</span>';
                         resultBox.classList.add('lottery-winner-anim');
                         
-                        GameState.rosters[winnerIndex].push(group.playerObj);
-                        GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                        if (!GameState.rosters[winnerIndex].some(p => p && p.id === group.playerObj.id)) {
+                            GameState.rosters[winnerIndex].push(group.playerObj);
+                            if (!group.playerObj.isSkip) {
+                                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
+                            }
+                        }
                         
                         // Save lottery result so guests can see it
                         GameState.lotteryResults[group.playerObj.id] = { winnerIndex: winnerIndex };
@@ -1321,6 +1401,13 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('roster-modal').style.display = 'none';
         });
     }
+
+    window.addEventListener('beforeunload', (e) => {
+        if (GameState.phase !== 'connection' && GameState.phase !== 'final_result') {
+            e.preventDefault();
+            e.returnValue = 'ゲーム進行中ですが、本当に終了しますか？';
+        }
+    });
 
     render();
 });
