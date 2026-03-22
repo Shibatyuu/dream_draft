@@ -316,9 +316,10 @@ function renderConnectionScreen() {
         localStorage.setItem('NPBDraftApp_GAS_URL', SERVER_URL);
 
         const hname = document.getElementById('host-name').value.trim() || 'Host';
-        statusEl.textContent = 'ルームを作成中...（数秒かかります）';
+        statusEl.textContent = 'ルームを作成中...(数秒かかります)';
         statusEl.className = 'status-message';
         try {
+            loadEmbeddedData();
             myPlayerName = hname;
             GameState.playerNames[0] = hname;
             GameState.numPlayers = 1;
@@ -387,6 +388,7 @@ function renderConnectionScreen() {
 
     document.getElementById('offline-btn').addEventListener('click', () => {
         isOnline = false;
+        loadEmbeddedData();
         GameState.phase = 'setup';
         render();
     });
@@ -655,6 +657,11 @@ function renderSetupScreen() {
         <div class="setup-actions">
             <button id="start-btn" class="btn btn-primary" ${!dataLoaded ? 'disabled' : ''} style="width: 100%; font-size: 1.25rem;">ドラフトを開始する</button>
         </div>
+        ${!isOnline ? `
+        <div style="margin-top: 1.5rem; text-align:center; border-top:1px solid var(--border-color); padding-top:1rem;">
+            <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">← ホームに戻る</button>
+        </div>
+        ` : ''}
     `;
     
     appContainer.appendChild(container);
@@ -690,6 +697,14 @@ function renderSetupScreen() {
         GameState.numRounds = parseInt(e.target.value, 10) || 5;
         if (isOnline && isHost) broadcastState();
     });
+
+    const backHomeBtn = document.getElementById('back-home-btn');
+    if (backHomeBtn) {
+        backHomeBtn.addEventListener('click', () => {
+            GameState.phase = 'connection';
+            render();
+        });
+    }
 
     document.getElementById('start-btn').addEventListener('click', async () => {
         saveState();
