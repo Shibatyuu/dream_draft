@@ -437,21 +437,22 @@ function startHostPolling() {
                             stateChanged = true;
                         }
                     }
+
                     if (action.type === 'select_player' && (GameState.phase === 'draft_input' || GameState.phase === 'draft_input_intermission')) {
                         const currentPlayerIndex = GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex];
                         if (GameState.playerNames[currentPlayerIndex] === action.name) {
                             saveState();
-                            // Resolve player from ID
                             const resolvedPlayer = findPlayerById(action.playerId) || action.payload;
-                            GameState.currentSelections[currentPlayerIndex] = resolvedPlayer;
-                            GameState.currentPlayerTurnIndex++;
-                            
-                            if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
-                                GameState.phase = 'draft_reveal';
-                            } else {
-                                GameState.phase = 'draft_input_intermission';
+                            if (resolvedPlayer) {
+                                GameState.currentSelections[currentPlayerIndex] = resolvedPlayer;
+                                GameState.currentPlayerTurnIndex++;
+                                if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
+                                    GameState.phase = 'draft_reveal';
+                                } else {
+                                    GameState.phase = 'draft_input_intermission';
+                                }
+                                stateChanged = true;
                             }
-                            stateChanged = true;
                         }
                     }
                 }
@@ -628,15 +629,24 @@ function renderSetupScreen() {
                 <h2 style="font-size:2.5rem; color:var(--accent-color); margin-bottom: 2rem;">ROOM: ${roomId}</h2>
                 <h3 style="margin-bottom: 1rem;">待機中...</h3>
                 <p style="color:var(--text-secondary); margin-bottom: 2rem;">ホストがドラフト設定を行い、開始するのをお待ちください。</p>
-                <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; text-align:left;">
+                <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; text-align:left; margin-bottom: 2rem;">
                     <h4>参加メンバー</h4>
                     <ul style="margin-top:0.5rem; color:var(--text-secondary);">
                         ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<li>${n}</li>`).join('')}
                     </ul>
                 </div>
+                <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">← ホームに戻る</button>
             </div>
         `;
         appContainer.appendChild(container);
+        
+        document.getElementById('back-home-btn').addEventListener('click', () => {
+            if (confirm('ホームに戻りますか？')) {
+                clearInterval(pollInterval);
+                GameState.phase = 'connection';
+                render();
+            }
+        });
         return;
     }
     
@@ -683,11 +693,9 @@ function renderSetupScreen() {
         <div class="setup-actions">
             <button id="start-btn" class="btn btn-primary" ${!dataLoaded ? 'disabled' : ''} style="width: 100%; font-size: 1.25rem;">ドラフトを開始する</button>
         </div>
-        ${!isOnline ? `
         <div style="margin-top: 1.5rem; text-align:center; border-top:1px solid var(--border-color); padding-top:1rem;">
             <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">← ホームに戻る</button>
         </div>
-        ` : ''}
     `;
     
     appContainer.appendChild(container);
@@ -1163,11 +1171,11 @@ function renderDraftRevealScreen() {
     async function processDraft() {
         singles.forEach(group => {
             const winnerIndex = group.nominatorIndices[0];
-            if (!GameState.rosters[winnerIndex].some(p => p && p.id === group.playerObj.id)) {
-                GameState.rosters[winnerIndex].push(group.playerObj);
-                if (!group.playerObj.isSkip) {
-                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-                }
+            // CRITICAL FIX: Use index-based assignment to prevent shifting
+            GameState.rosters[winnerIndex][GameState.currentRound - 1] = group.playerObj;
+            
+            if (!group.playerObj.isSkip) {
+                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
             }
         });
 
@@ -1183,14 +1191,11 @@ function renderDraftRevealScreen() {
             await runLotteryForGroup(group);
         }
 
-        // Safety Alignment: Ensure EVERY player in this sub-round got an entry in their roster
-        // (Even if they somehow didn't pick or weren't in a group, which shouldn't happen with the Skip button)
-        const roundNum = GameState.rosters[0].length; // Expecting current round count to be same for all
+        // Safety Alignment: Ensure EVERY player in this round has a slot filled
+        // Use currentRound - 1 to ensure we are filling the correct horizontal row
         GameState.playersToDraftThisRound.forEach(pIdx => {
-             // If a player's roster is shorter than others, they missed a pick this sub-round
-             if (GameState.rosters[pIdx].length < roundNum) {
-                 // Note: This shouldn't normally hit if Skip button is used, but it prevents 'shifting'
-                 GameState.rosters[pIdx].push({ name: '（未指名）', isSkip: true, team: '-', position: '-' });
+             if (!GameState.rosters[pIdx][GameState.currentRound - 1]) {
+                 GameState.rosters[pIdx][GameState.currentRound - 1] = { name: '（未指名）', isSkip: true, team: '-', position: '-' };
              }
         });
 
@@ -1223,11 +1228,12 @@ function renderDraftRevealScreen() {
             if (existingResult) {
                 const winnerName = GameState.playerNames[existingResult.winnerIndex];
                 resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + winnerName + '</span>';
-                if (!GameState.rosters[existingResult.winnerIndex].some(p => p && p.id === group.playerObj.id)) {
-                    GameState.rosters[existingResult.winnerIndex].push(group.playerObj);
-                    if (!group.playerObj.isSkip) {
-                        GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-                    }
+                
+                // CRITICAL FIX: Use index-based assignment
+                GameState.rosters[existingResult.winnerIndex][GameState.currentRound - 1] = group.playerObj;
+                
+                if (!group.playerObj.isSkip) {
+                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
                 }
                 group.nominatorIndices.forEach(idx => {
                     if (idx !== existingResult.winnerIndex) losers.push(idx);
@@ -1260,11 +1266,11 @@ function renderDraftRevealScreen() {
                         resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + GameState.playerNames[winnerIndex] + '</span>';
                         resultBox.classList.add('lottery-winner-anim');
                         
-                        if (!GameState.rosters[winnerIndex].some(p => p && p.id === group.playerObj.id)) {
-                            GameState.rosters[winnerIndex].push(group.playerObj);
-                            if (!group.playerObj.isSkip) {
-                                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-                            }
+                        // CRITICAL FIX: Use index-based assignment
+                        GameState.rosters[winnerIndex][GameState.currentRound - 1] = group.playerObj;
+                        
+                        if (!group.playerObj.isSkip) {
+                            GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
                         }
                         
                         // Save lottery result so guests can see it
@@ -1406,6 +1412,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (GameState.phase !== 'connection' && GameState.phase !== 'final_result') {
             e.preventDefault();
             e.returnValue = 'ゲーム進行中ですが、本当に終了しますか？';
+        }
+    });
+
+    // Mobile stability: re-render or re-force poll when coming back to the tab
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            // When user returns to tab, refresh UI
+            render();
         }
     });
 
