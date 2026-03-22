@@ -413,11 +413,13 @@ function startHostPolling() {
                             stateChanged = true;
                         }
                     }
-                    if (action.type === 'select_player' && GameState.phase === 'draft_input') {
+                    if (action.type === 'select_player' && (GameState.phase === 'draft_input' || GameState.phase === 'draft_input_intermission')) {
                         const currentPlayerIndex = GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex];
                         if (GameState.playerNames[currentPlayerIndex] === action.name) {
                             saveState();
-                            GameState.currentSelections[currentPlayerIndex] = action.payload;
+                            // Resolve player from ID
+                            const resolvedPlayer = findPlayerById(action.playerId) || action.payload;
+                            GameState.currentSelections[currentPlayerIndex] = resolvedPlayer;
                             GameState.currentPlayerTurnIndex++;
                             
                             if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
@@ -1012,7 +1014,7 @@ function renderDraftInputScreen() {
             await sendClientAction({
                 type: 'select_player',
                 name: myPlayerName,
-                payload: selectedPlayer
+                playerId: selectedPlayer.id
             });
             appContainer.innerHTML = '<h2 style="text-align:center; padding:3rem;">指名を送信しました。ホストの処理待ち...</h2>';
         } else {
