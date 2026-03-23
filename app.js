@@ -643,6 +643,30 @@ function renderDraftInputIntermission() {
     render();
 }
 
+const getTeamColor = (tName) => {
+    if(tName.includes('阪神')) return {bg: '#F5C700', fg: '#000000'}; 
+    if(tName.includes('DeNA') || tName.includes('ベイスターズ')) return {bg: '#0055A5', fg: '#ffffff'}; 
+    if(tName.includes('巨人') || tName.includes('ジャイアンツ') || tName.includes('読売')) return {bg: '#F97709', fg: '#ffffff'}; 
+    if(tName.includes('中日') || tName.includes('ドラゴンズ')) return {bg: '#003595', fg: '#ffffff'}; 
+    if(tName.includes('広島') || tName.includes('カープ')) return {bg: '#FF0000', fg: '#ffffff'}; 
+    if(tName.includes('ヤクルト') || tName.includes('スワローズ')) return {bg: '#98C145', fg: '#000000'}; 
+    if(tName.includes('ソフトバンク') || tName.includes('ホークス')) return {bg: '#F9C700', fg: '#000000'}; 
+    if(tName.includes('日本ハム') || tName.includes('ファイターズ')) return {bg: '#4C7B9E', fg: '#ffffff'}; 
+    if(tName.includes('オリックス') || tName.includes('バファローズ')) return {bg: '#10284D', fg: '#ffffff'}; 
+    if(tName.includes('楽天') || tName.includes('イーグルス')) return {bg: '#860010', fg: '#ffffff'}; 
+    if(tName.includes('西武') || tName.includes('ライオンズ')) return {bg: '#1A3C6B', fg: '#ffffff'}; 
+    if(tName.includes('ロッテ') || tName.includes('マリーンズ')) return {bg: '#222222', fg: '#ffffff'}; 
+    return {bg: '#6B7280', fg: '#ffffff'}; 
+};
+
+const getPosColor = (pName) => {
+    if(pName.includes('投')) return {bg: '#ef4444', fg: '#ffffff'}; 
+    if(pName.includes('捕')) return {bg: '#3b82f6', fg: '#ffffff'}; 
+    if(pName.includes('内')) return {bg: '#eab308', fg: '#000000'}; 
+    if(pName.includes('外')) return {bg: '#10b981', fg: '#ffffff'}; 
+    return {bg: '#6B7280', fg: '#ffffff'};
+};
+
 function renderDraftInputScreen() {
     appContainer.innerHTML = '';
     const myIdx = GameState.playerNames.indexOf(myPlayerName);
@@ -694,6 +718,43 @@ function renderDraftInputScreen() {
             <h2>${myPlayerName} の指名</h2>
             <span class="badge badge-accent">${roundText}</span>
         </div>
+        
+        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 0.5rem; border: 1px solid var(--border-color);">
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">球団:</div>
+                <div class="team-pills-container">
+                    ${[...(GlobalTags.ceLeagueTeams || []), ...(GlobalTags.paLeagueTeams || []), ...(GlobalTags.otherTeams || [])].map(t => {
+                        const style = getTeamColor(t);
+                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+                            <span class="team-pill">${t}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+            </div>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">位置:</div>
+                <div class="team-pills-container">
+                    ${GlobalTags.positions.map(p => {
+                        const style = getPosColor(p);
+                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${p}" class="pos-filter-checkbox" style="display:none;">
+                            <span class="team-pill">${p}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+            </div>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">年俸:</div>
+                <div class="team-pills-container">
+                    ${[5000, 10000, 20000].map(v => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
+                        <input type="checkbox" value="${v}" class="salary-filter-checkbox" style="display:none;">
+                        <span class="team-pill">${v/10000}億以上</span>
+                    </label>`).join('')}
+                </div>
+            </div>
+        </div>
+
         <input type="text" id="p-search" class="form-control" placeholder="検索..." style="margin:1rem 0;">
         <div id="sel-info" style="padding:1rem; background:rgba(0,0,0,0.2); border:1px dashed var(--border-color); border-radius:1rem; margin-bottom:1rem; min-height:60px;">
             <p style="text-align:center; color:var(--text-secondary);">選手を選択してください</p>
@@ -714,7 +775,25 @@ function renderDraftInputScreen() {
     const list = document.getElementById('p-list'), info = document.getElementById('sel-info'), btn = document.getElementById('conf-btn');
     const draw = (f='') => {
         list.innerHTML = '';
-        GameState.availablePlayers.filter(p => !f || p.name.includes(f) || p.team.includes(f) || p.position.includes(f)).slice(0,50).forEach(p => {
+        const lowerFilter = f.toLowerCase();
+        
+        const fTeams = Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(cb => cb.value);
+        const fPosArr = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(cb => cb.value);
+        const activeSalChecks = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked'));
+        const minSalary = activeSalChecks.length > 0 ? Math.min(...activeSalChecks.map(cb => parseInt(cb.value, 10))) : null;
+
+        GameState.availablePlayers.filter(p => {
+            if (fTeams.length > 0 && !fTeams.includes(p.team)) return false;
+            if (fPosArr.length > 0 && !fPosArr.some(filterPos => p.position.includes(filterPos))) return false;
+            if (minSalary && p.salary < minSalary) return false;
+            
+            if (lowerFilter) {
+                return p.name.toLowerCase().includes(lowerFilter) || 
+                       p.team.toLowerCase().includes(lowerFilter) ||
+                       p.position.toLowerCase().includes(lowerFilter);
+            }
+            return true;
+        }).slice(0,50).forEach(p => {
             const tr = document.createElement('tr'); tr.className = 'player-row';
             if(selected && selected.id === p.id) tr.classList.add('selected');
             tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td>`;
@@ -728,6 +807,9 @@ function renderDraftInputScreen() {
     };
     draw();
     document.getElementById('p-search').oninput = (e) => draw(e.target.value);
+    document.querySelectorAll('.team-filter-checkbox, .pos-filter-checkbox, .salary-filter-checkbox').forEach(cb => {
+        cb.onchange = () => draw(document.getElementById('p-search').value);
+    });
     const finalize = async (p) => {
         if(isOnline) await sendClientAction({ type: 'select_player', name: myPlayerName, playerId: p.id, isSkip: !!p.isSkip });
         GameState.currentSelections[myIdx] = p;
