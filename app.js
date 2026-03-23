@@ -25,6 +25,7 @@ const GameState = {
     rosters: [[], [], [], []],
     confirmedPlayers: {},
     lotteryResults: {},
+    activeLottery: null, // { playerId, participants, startTime, isRunning }
     losers: [],
     lastSeen: {},
     playerStatus: {}, // {name: boolean} online status
@@ -499,9 +500,15 @@ function startClientPolling() {
                         GameState.rosters = s.rosterIds.map(r => r.map(id => findPlayerById(id)));
                     }
                     if (s.currentSelectionIds) {
+                        const myIdx = GameState.playerNames.indexOf(myPlayerName);
+                        const localMine = GameState.currentSelections[myIdx];
                         GameState.currentSelections = {};
                         for (const k of Object.keys(s.currentSelectionIds)) {
                             GameState.currentSelections[k] = findPlayerById(s.currentSelectionIds[k]);
+                        }
+                        // Protect local selection until server confirms it
+                        if (localMine && !GameState.currentSelections[myIdx]) {
+                            GameState.currentSelections[myIdx] = localMine;
                         }
                     }
                     const skip = new Set(['availablePlayerIds', 'rosterIds', 'currentSelectionIds', 'csvData', 'availablePlayers', 'rosters', 'currentSelections']);
@@ -865,6 +872,41 @@ function renderDraftRevealScreen() {
     container.style.textAlign = 'center';
 
     let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound-1) + ')' : ''}`;
+
+    // 1. Lottery View (Dedicated)
+    if (GameState.activeLottery) {
+        const al = GameState.activeLottery;
+        const playerObj = findPlayerById(al.playerId);
+        const elapsed = Date.now() - al.startTime;
+        const isFinished = elapsed >= 3000 || GameState.lotteryResults[al.playerId];
+
+        container.innerHTML = `
+            <div style="padding:2rem;">
+                <h2 style="color:var(--warning-color); font-size:2rem; margin-bottom:1rem;">抽選中...</h2>
+                <div class="glass-panel" style="background:rgba(245, 158, 11, 0.1); border:1px solid var(--warning-color); padding:2rem;">
+                    <h3 style="font-size:2.5rem; margin-bottom:1rem;">${playerObj ? playerObj.name : '選手'}</h3>
+                    <p style="color:var(--text-secondary); margin-bottom:2rem;">競合: ${al.participants.map(i => GameState.playerNames[i]).join(', ')}</p>
+                    <div id="lottery-display" style="font-size:3rem; font-weight:bold; min-height:4rem; color:var(--accent-color);">
+                        ${GameState.playerNames[al.participants[Math.floor((Date.now() / 100) % al.participants.length)]]}
+                    </div>
+                </div>
+            </div>
+        `;
+        appContainer.appendChild(container);
+
+        if (!isFinished) {
+            setTimeout(render, 100);
+        } else {
+            const res = GameState.lotteryResults[al.playerId];
+            if (res) {
+                const winnerName = GameState.playerNames[res.winnerIndex];
+                document.getElementById('lottery-display').innerHTML = `<span class="lottery-winner-anim" style="color:var(--success-color)">交渉権獲得: ${winnerName}</span>`;
+            }
+        }
+        return;
+    }
+
+    // 2. Standard Reveal Grid
     container.innerHTML = `
         <h2 style="color:var(--accent-color);">${roundText} 結果発表</h2>
         <div class="reveal-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:1rem; margin:2rem 0;"></div>
@@ -919,9 +961,24 @@ function renderDraftRevealScreen() {
                 rDiv.appendChild(b);
                 b.onclick = async () => {
                     b.style.display = 'none';
-                    const winIdx = g.observers[Math.floor(Math.random()*g.observers.length)];
-                    GameState.lotteryResults[g.p.id] = { winnerIndex: winIdx };
-                    await broadcastState(); render();
+                    // Start synced lottery
+                    GameState.activeLottery = { 
+                        playerId: g.p.id, 
+                        participants: g.observers, 
+                        startTime: Date.now(), 
+                        isRunning: true 
+                    };
+                    await broadcastState();
+                    render();
+
+                    // Wait for animation
+                    setTimeout(async () => {
+                        const winIdx = g.observers[Math.floor(Math.random()*g.observers.length)];
+                        GameState.lotteryResults[g.p.id] = { winnerIndex: winIdx };
+                        GameState.activeLottery = null;
+                        await broadcastState(); 
+                        render();
+                    }, 4000);
                 };
             } else {
                 rDiv.innerHTML = 'ホストの抽選待ち...';
