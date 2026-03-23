@@ -24,8 +24,11 @@ const GameState = {
     currentSelections: {}, 
     rosters: [[], [], [], []],
     confirmedPlayers: {},
+    lotteryResults: {},
     losers: [],
-    lastSeen: {} 
+    lastSeen: {},
+    playerStatus: {}, // {name: boolean} online status
+    godsHandUsed: {}  // {name: boolean} placeholder for future feature
 };
 
 const appContainer = document.getElementById('main-content');
@@ -106,7 +109,10 @@ function generateRosterHTML() {
         
         html += `
         <div class="stat-card glass-panel" style="min-width: 280px; padding: 1rem; flex: 1; border:1px solid var(--accent-color); background: rgba(59, 130, 246, 0.05);">
-            <h3 style="color:var(--text-primary); margin-bottom: 0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">${GameState.playerNames[i]}</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
+                <h3 style="margin:0;">${GameState.playerNames[i]}</h3>
+                ${getStatusDot(GameState.playerNames[i])}
+            </div>
             <div style="font-size: 0.85rem; display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem;">
                 <span style="color:var(--text-secondary)">選択数</span> <strong>${count} 人</strong>
                 <span style="color:var(--text-secondary)">選択球団</span> <strong>${draftedNPBTeams.size} 球団</strong>
@@ -166,12 +172,10 @@ function renderRosterModal() {
     modal.style.display = 'flex';
 }
 
-// Helper to generate IDs
 function generateId() {
     return Math.random().toString(36).substr(2, 9);
 }
 
-// Validate and parse CSV
 function handleCSVUpload(file) {
     const statusEl = document.getElementById('csv-status');
     const startBtn = document.getElementById('start-btn');
@@ -199,8 +203,6 @@ function handleCSVUpload(file) {
                 return;
             }
 
-            // Normalize data - ensure each player has a unique id, name, team, position
-            // We'll guess the column names, fallback to just index mapping if needed
             const cols = Object.keys(data[0]);
             const nameCol = cols.find(c => c.includes('名前') || c.includes('選手') || c.toLowerCase().includes('name')) || cols[0];
             const teamCol = cols.find(c => c.includes('球団') || c.includes('チーム') || c.toLowerCase().includes('team')) || cols[1] || '';
@@ -231,52 +233,15 @@ function handleCSVUpload(file) {
             });
 
             GameState.availablePlayers = [...GameState.csvData];
+            reconstructGlobalTags();
 
-            // Initialize global tags with grouping
-            const CE_ORDER = ['阪神', 'DeNA', '巨人', '中日', '広島', 'ヤクルト'];
-            const PA_ORDER = ['ソフトバンク', '日本ハム', 'オリックス', '楽天', '西武', 'ロッテ'];
-            const ceMap = new Map();
-            const paMap = new Map();
-            const otherSet = new Set();
-
-            GameState.csvData.forEach(p => {
-                const t = p.team;
-                if (!t || t === '-') return;
-                
-                let matched = false;
-                for (let kw of CE_ORDER) {
-                    if (t.includes(kw) || (kw === '巨人' && (t.includes('ジャイアンツ') || t.includes('読売')))) {
-                        ceMap.set(kw, t); 
-                        matched = true; break;
-                    }
-                }
-                if (!matched) {
-                    for (let kw of PA_ORDER) {
-                        if (t.includes(kw) || (kw === 'ソフトバンク' && (t.includes('ホークス') || t.includes('SoftBank')))) {
-                            paMap.set(kw, t);
-                            matched = true; break;
-                        }
-                    }
-                }
-                if (!matched) {
-                    otherSet.add(t);
-                }
-            });
-            
-            GlobalTags.ceLeagueTeams = CE_ORDER.map(kw => ceMap.get(kw)).filter(Boolean);
-            GlobalTags.paLeagueTeams = PA_ORDER.map(kw => paMap.get(kw)).filter(Boolean);
-            GlobalTags.otherTeams = Array.from(otherSet).sort();
-            GlobalTags.teams = [...GlobalTags.ceLeagueTeams, ...GlobalTags.paLeagueTeams, ...GlobalTags.otherTeams];
-
-            statusEl.textContent = `${GameState.csvData.length}人の選手データを読み込みました。列名: (${nameCol}, ${teamCol}, ${posCol}, ${ageCol}, ${salaryCol})`;
+            statusEl.textContent = `${GameState.csvData.length}人の選手データを読み込みました。`;
             statusEl.className = 'status-message status-success';
-            
             startBtn.disabled = false;
         }
     });
 }
 
-// Network & Connection Phase
 function renderConnectionScreen() {
     appContainer.innerHTML = '';
     const container = document.createElement('div');
@@ -305,7 +270,7 @@ function renderConnectionScreen() {
         <div id="connection-status" class="status-message" style="margin-top: 1rem;"></div>
         
         <div style="margin-top: 2rem; text-align:center; border-top:1px solid var(--border-color); padding-top:1rem;">
-            <button id="offline-btn" class="btn btn-warning-outline" style="width: 100%;">オンラインを使用せずオフラインで開始する</button>
+            <button id="offline-btn" class="btn btn-warning-outline" style="width: 100%;">オフラインで開始する</button>
         </div>
     `;
     
@@ -320,14 +285,14 @@ function renderConnectionScreen() {
         localStorage.setItem('NPBDraftApp_GAS_URL', SERVER_URL);
 
         const hname = document.getElementById('host-name').value.trim() || 'Host';
-        statusEl.textContent = 'ルームを作成中...(数秒かかります)';
+        statusEl.textContent = 'ルームを作成中...';
         statusEl.className = 'status-message';
         try {
             loadEmbeddedData();
             myPlayerName = hname;
             GameState.playerNames[0] = hname;
             GameState.numPlayers = 1;
-            const initState = { phase: GameState.phase, numPlayers: GameState.numPlayers, playerNames: GameState.playerNames, numRounds: GameState.numRounds };
+            const initState = { phase: 'setup', numPlayers: 1, playerNames: [hname], numRounds: GameState.numRounds };
             const res = await fetch(SERVER_URL + '?path=/create', {
                 method: 'POST',
                 body: JSON.stringify({ state: initState })
@@ -343,9 +308,8 @@ function renderConnectionScreen() {
             await broadcastState();
             startHostPolling();
             render();
-            
         } catch (e) {
-            statusEl.textContent = 'サーバーへの接続に失敗しました。URLが正しいか確認してください。';
+            statusEl.textContent = '接続に失敗しました。URLを確認してください。';
             statusEl.className = 'status-message status-error';
         }
     });
@@ -358,38 +322,10 @@ function renderConnectionScreen() {
 
         const jId = document.getElementById('join-room-id').value.trim();
         const jName = document.getElementById('join-room-name').value.trim() || 'Guest';
-        if (!jId) {
-            statusEl.textContent = 'ルームIDを入力してください。';
-            statusEl.className = 'status-message status-error';
-            return;
-        }
-        statusEl.textContent = 'ルームに接続中...（数秒かかります）';
-        statusEl.className = 'status-message';
+        if (!jId) { alert("ルームIDを入力してください"); return; }
+
+        statusEl.textContent = '参加中...';
         try {
-            // First, fetch the room state to validate if the player can join
-            const checkRes = await fetch(SERVER_URL + '?path=/room&room_id=' + jId);
-            if (!checkRes.ok) throw new Error("Fetch failed");
-            const checkData = await checkRes.json();
-            
-            if (!checkData.state || Object.keys(checkData.state).length === 0) {
-                statusEl.textContent = 'ルームが見つかりません。';
-                statusEl.className = 'status-message status-error';
-                return;
-            }
-
-            const currentState = checkData.state;
-            const isOngoing = currentState.phase && currentState.phase !== 'setup' && currentState.phase !== 'connection';
-            
-            if (isOngoing) {
-                // If game is ongoing, the name MUST be already in the participant list
-                const names = currentState.playerNames || [];
-                if (!names.includes(jName)) {
-                    statusEl.textContent = 'ルームIDか名前が違います（進行中のゲームには未登録の名前で参加できません）';
-                    statusEl.className = 'status-message status-error';
-                    return;
-                }
-            }
-
             const res = await fetch(SERVER_URL + '?path=/action', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -405,12 +341,10 @@ function renderConnectionScreen() {
                 roomId = jId;
                 startClientPolling();
             } else {
-                statusEl.textContent = 'ルームに参加できませんでした。';
-                statusEl.className = 'status-message status-error';
+                statusEl.textContent = 'ルームに参加できません。';
             }
         } catch (e) {
-            statusEl.textContent = 'サーバー通信エラーが発生しました。';
-            statusEl.className = 'status-message status-error';
+            statusEl.textContent = 'エラーが発生しました。';
         }
     });
 
@@ -431,99 +365,90 @@ function startHostPolling() {
                 body: JSON.stringify({ room_id: roomId, client_id: clientId })
             });
             const data = await res.json();
-            if (data.actions && data.actions.length > 0) {
+            if (data.actions) {
                 let stateChanged = false;
                 for(let action of data.actions) {
                     if (action.type === 'join' && GameState.phase === 'setup') {
-                        if (GameState.numPlayers < 4) {
+                        if (GameState.numPlayers < 4 && !GameState.playerNames.includes(action.name)) {
                             GameState.playerNames[GameState.numPlayers] = action.name;
                             GameState.numPlayers++;
                             stateChanged = true;
                         }
                     }
-
                     if (action.type === 'ping') {
-                        // Heartbeat from guest
                         GameState.lastSeen[action.name] = Date.now();
                         stateChanged = true;
                     }
-
-                    if (action.type === 'select_player' && (GameState.phase === 'draft_input' || GameState.phase === 'draft_input_intermission')) {
-                        const senderIndex = GameState.playerNames.indexOf(action.name);
-                        if (GameState.playersToDraftThisRound.includes(senderIndex) && !GameState.currentSelections[senderIndex]) {
-                            saveState();
-                            const resolvedPlayer = findPlayerById(action.playerId) || action.payload;
-                            if (resolvedPlayer) {
-                                GameState.currentSelections[senderIndex] = resolvedPlayer;
-                                
-                                // Check if all players in this sub-round have selected
-                                const selectionsCount = Object.keys(GameState.currentSelections).length;
-                                if (selectionsCount >= GameState.playersToDraftThisRound.length) {
-                                    GameState.phase = 'draft_reveal';
-                                } else {
-                                    // Move currentPlayerTurnIndex to the next person who hasn't picked yet (for UI display)
-                                    while (GameState.currentPlayerTurnIndex < GameState.playersToDraftThisRound.length && 
-                                           GameState.currentSelections[GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex]]) {
-                                        GameState.currentPlayerTurnIndex++;
-                                    }
-                                }
+                    if (action.type === 'select_player' && GameState.phase === 'draft_input') {
+                        const idx = GameState.playerNames.indexOf(action.name);
+                        if (GameState.playersToDraftThisRound.includes(idx) && !GameState.currentSelections[idx]) {
+                            const p = findPlayerById(action.playerId) || (action.isSkip ? { id: action.playerId, name: '（選択パス）', team: '-', position: '-', isSkip: true } : null);
+                            if (p) {
+                                GameState.currentSelections[idx] = p;
                                 stateChanged = true;
                             }
                         }
                     }
-
                     if (action.type === 'confirm_reveal' && GameState.phase === 'draft_reveal') {
                         GameState.confirmedPlayers[action.name] = true;
                         stateChanged = true;
                     }
-                    
-                    // Always update lastSeen for any action
-                    if (action.name) {
-                        GameState.lastSeen[action.name] = Date.now();
+                }
+
+                // Check for online status
+                GameState.playerStatus = {};
+                GameState.playerNames.slice(0, GameState.numPlayers).forEach(n => {
+                    const last = GameState.lastSeen[n] || 0;
+                    GameState.playerStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
+                });
+
+                // Auto-advance if everyone picking
+                if (GameState.phase === 'draft_input') {
+                    const pickedCount = Object.keys(GameState.currentSelections).length;
+                    if (pickedCount >= GameState.playersToDraftThisRound.length && GameState.playersToDraftThisRound.length > 0) {
+                        GameState.phase = 'draft_reveal';
+                        stateChanged = true;
                     }
                 }
-                
-                // Host check for auto-advance
-                if (isHost && GameState.phase === 'draft_reveal') {
-                    const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
+
+                // Auto-advance if everyone confirmed
+                if (GameState.phase === 'draft_reveal') {
+                    const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
                     if (unconfirmed.length === 0) {
                         advanceDraft();
                         stateChanged = true;
                     }
                 }
-                
+
                 if (stateChanged) {
                     await broadcastState();
                     render();
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error('Host polling error', e);
+        }
     }, 3000);
 }
 
 async function broadcastState() {
     if (!isHost || !isOnline) return;
     try {
-        // Send lightweight state: exclude csvData and availablePlayers
         const lightState = {};
         for (const key of Object.keys(GameState)) {
-            if (key === 'csvData') continue; // never send
+            if (key === 'lastSeen' || key === 'csvData') continue; 
             if (key === 'availablePlayers') {
-                // Send only IDs of available players
                 lightState.availablePlayerIds = GameState.availablePlayers.map(p => p.id);
                 continue;
             }
             if (key === 'rosters') {
-                // Send only IDs for rosters
                 lightState.rosterIds = GameState.rosters.map(roster => roster.map(p => p ? p.id : null));
                 continue;
             }
             if (key === 'currentSelections') {
-                // Send only IDs for current selections
                 const selIds = {};
                 for (const k of Object.keys(GameState.currentSelections)) {
-                    const sel = GameState.currentSelections[k];
-                    selIds[k] = sel ? sel.id : null;
+                    selIds[k] = GameState.currentSelections[k] ? GameState.currentSelections[k].id : null;
                 }
                 lightState.currentSelectionIds = selIds;
                 continue;
@@ -550,6 +475,7 @@ async function sendClientAction(actionObj) {
 
 function findPlayerById(id) {
     if (!id) return null;
+    if (id.startsWith('skip-')) return { id, name: '（選択パス）', team: '-', position: '-', isSkip: true };
     return GameState.csvData.find(p => p.id === id) || null;
 }
 
@@ -562,70 +488,49 @@ function startClientPolling() {
                 const data = await res.json();
                 if (data.version > lastVersion) {
                     lastVersion = data.version;
-                    const serverState = data.state;
+                    const s = data.state;
+                    if (!GameState.csvData.length) loadEmbeddedData();
                     
-                    // Ensure local embedded data is loaded
-                    if (!GameState.csvData || GameState.csvData.length === 0) {
-                        loadEmbeddedData();
+                    if (s.availablePlayerIds) {
+                        const set = new Set(s.availablePlayerIds);
+                        GameState.availablePlayers = GameState.csvData.filter(p => set.has(p.id));
                     }
-                    
-                    // Merge lightweight server state back into full local state
-                    // Restore availablePlayers from IDs
-                    if (serverState.availablePlayerIds) {
-                        const idSet = new Set(serverState.availablePlayerIds);
-                        GameState.availablePlayers = GameState.csvData.filter(p => idSet.has(p.id));
+                    if (s.rosterIds) {
+                        GameState.rosters = s.rosterIds.map(r => r.map(id => findPlayerById(id)));
                     }
-                    // Restore rosters from IDs
-                    if (serverState.rosterIds) {
-                        GameState.rosters = serverState.rosterIds.map(roster => roster.map(id => findPlayerById(id)));
-                    }
-                    // Restore currentSelections from IDs
-                    if (serverState.currentSelectionIds) {
+                    if (s.currentSelectionIds) {
                         GameState.currentSelections = {};
-                        for (const k of Object.keys(serverState.currentSelectionIds)) {
-                            GameState.currentSelections[k] = findPlayerById(serverState.currentSelectionIds[k]);
+                        for (const k of Object.keys(s.currentSelectionIds)) {
+                            GameState.currentSelections[k] = findPlayerById(s.currentSelectionIds[k]);
                         }
                     }
-                    // Copy other simple fields
-                    const skipKeys = new Set(['availablePlayerIds', 'rosterIds', 'currentSelectionIds', 'csvData', 'availablePlayers', 'rosters', 'currentSelections']);
-                    for (const key of Object.keys(serverState)) {
-                        if (!skipKeys.has(key)) {
-                            GameState[key] = serverState[key];
-                        }
-                    }
-                    
-                    if (!GlobalTags.ceLeagueTeams || GlobalTags.ceLeagueTeams.length === 0) {
-                        reconstructGlobalTags();
+                    const skip = new Set(['availablePlayerIds', 'rosterIds', 'currentSelectionIds', 'csvData', 'availablePlayers', 'rosters', 'currentSelections']);
+                    for (const key of Object.keys(s)) {
+                        if (!skip.has(key)) GameState[key] = s[key];
                     }
                     render();
                 }
             }
-            
-            // Send heartbeat if in setup
-            if (isOnline && !isHost && GameState.phase === 'setup') {
-                sendClientAction({ type: 'ping', name: myPlayerName });
-            }
+            if (isOnline && !isHost) sendClientAction({ type: 'ping', name: myPlayerName });
         } catch(e) {}
     }, 3000);
 }
 
 function reconstructGlobalTags() {
-    const CE_ORDER = ['阪神', 'DeNA', '巨人', '中日', '広島', 'ヤクルト'];
-    const PA_ORDER = ['ソフトバンク', '日本ハム', 'オリックス', '楽天', '西武', 'ロッテ'];
-    const ceMap = new Map();
-    const paMap = new Map();
-    const otherSet = new Set();
+    const CE = ['阪神', 'DeNA', '巨人', '中日', '広島', 'ヤクルト'];
+    const PA = ['ソフトバンク', '日本ハム', 'オリックス', '楽天', '西武', 'ロッテ'];
+    const ceMap = new Map(), paMap = new Map(), otherSet = new Set();
     GameState.csvData.forEach(p => {
         const t = p.team;
         if (!t || t === '-') return;
         let matched = false;
-        for (let kw of CE_ORDER) {
+        for (let kw of CE) {
             if (t.includes(kw) || (kw === '巨人' && (t.includes('ジャイアンツ') || t.includes('読売')))) {
                 ceMap.set(kw, t); matched = true; break;
             }
         }
         if (!matched) {
-            for (let kw of PA_ORDER) {
+            for (let kw of PA) {
                 if (t.includes(kw) || (kw === 'ソフトバンク' && (t.includes('ホークス') || t.includes('SoftBank')))) {
                     paMap.set(kw, t); matched = true; break;
                 }
@@ -633,25 +538,23 @@ function reconstructGlobalTags() {
         }
         if (!matched) otherSet.add(t);
     });
-    GlobalTags.ceLeagueTeams = CE_ORDER.map(kw => ceMap.get(kw)).filter(Boolean);
-    GlobalTags.paLeagueTeams = PA_ORDER.map(kw => paMap.get(kw)).filter(Boolean);
+    GlobalTags.ceLeagueTeams = CE.map(kw => ceMap.get(kw)).filter(Boolean);
+    GlobalTags.paLeagueTeams = PA.map(kw => paMap.get(kw)).filter(Boolean);
     GlobalTags.otherTeams = Array.from(otherSet).sort();
-    GlobalTags.teams = [...GlobalTags.ceLeagueTeams, ...GlobalTags.paLeagueTeams, ...GlobalTags.otherTeams];
 }
 
 function loadEmbeddedData() {
     if (typeof EMBEDDED_PLAYERS === 'undefined' || !EMBEDDED_PLAYERS) return;
     GameState.csvData = EMBEDDED_PLAYERS.map((p, idx) => ({
-        id: p.id,
-        originalId: idx,
-        name: p.name,
-        team: p.team || '-',
-        position: p.position || '-',
-        salary: p.salary || 0,
-        age: p.age || 0
+        id: p.id, originalId: idx, name: p.name, team: p.team || '-', position: p.position || '-', salary: p.salary || 0, age: p.age || 0
     }));
     GameState.availablePlayers = [...GameState.csvData];
     reconstructGlobalTags();
+}
+
+function getStatusDot(name) {
+    const ok = GameState.playerStatus[name] !== false;
+    return `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${ok ? 'var(--success-color)' : 'var(--danger-color)'}; margin:0 4px;"></span>`;
 }
 
 function renderSetupScreen() {
@@ -659,895 +562,309 @@ function renderSetupScreen() {
     const container = document.createElement('div');
     container.className = 'glass-panel setup-screen';
 
-    // Auto-load embedded data if not already loaded
-    if (!GameState.csvData || GameState.csvData.length === 0) {
-        loadEmbeddedData();
-    }
+    if (!GameState.csvData.length) loadEmbeddedData();
 
     if (isOnline && !isHost) {
         container.innerHTML = `
             <div style="text-align:center; padding: 3rem 1rem;">
-                <h2 style="font-size:2.5rem; color:var(--accent-color); margin-bottom: 2rem;">ROOM: ${roomId}</h2>
-                <h3 style="margin-bottom: 1rem;">待機中...</h3>
-                <p style="color:var(--text-secondary); margin-bottom: 2rem;">ホストがドラフト設定を行い、開始するのをお待ちください。</p>
-                <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; text-align:left; margin-bottom: 2rem;">
-                    <h4>参加メンバー</h4>
-                    <ul style="margin-top:0.5rem; color:var(--text-secondary);">
-                        ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<li>${n}</li>`).join('')}
+                <h2 style="font-size:2.5rem; color:var(--accent-color);">ROOM: ${roomId}</h2>
+                <h3>待機中...</h3>
+                <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; text-align:left; margin: 2rem 0;">
+                    <h4>参加者</h4>
+                    <ul style="color:var(--text-secondary);">
+                        ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<li>${getStatusDot(n)} ${n}</li>`).join('')}
                     </ul>
                 </div>
-                <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">← ホームに戻る</button>
+                <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">戻る</button>
             </div>
         `;
         appContainer.appendChild(container);
-        
-        document.getElementById('back-home-btn').addEventListener('click', () => {
-            if (confirm('ホームに戻りますか？')) {
-                clearInterval(pollInterval);
-                GameState.phase = 'connection';
-                render();
-            }
-        });
+        document.getElementById('back-home-btn').onclick = () => { GameState.phase = 'connection'; render(); };
         return;
     }
     
-    const dataLoaded = GameState.csvData && GameState.csvData.length > 0;
-
     container.innerHTML = `
-        <h2 style="text-align:center; margin-bottom: 2rem; font-family: var(--font-display); font-size: 2rem;">${isOnline ? 'ROOM: ' + roomId : 'GAME SETUP'}</h2>
-        
-        ${isOnline ? `
+        <h2 style="text-align:center; margin-bottom: 2rem;">${isOnline ? 'ROOM: ' + roomId : 'SETUP'}</h2>
         <div class="form-group">
-            <label class="form-label">参加メンバー (${GameState.numPlayers}人)</label>
-            <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; color:var(--text-secondary);">
-                ${GameState.playerNames.slice(0, GameState.numPlayers).map((n, i) => {
-                    const isMe = n === myPlayerName;
-                    const last = GameState.lastSeen[n] || 0;
-                    const isOnlineStatus = isMe || (Date.now() - last < 10000);
-                    const statusColor = isOnlineStatus ? 'var(--success-color)' : 'var(--danger-color)';
-                    return `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">
-                        <span>${i+1}. ${n} ${i === 0 ? '(Host)' : ''}</span>
-                        <span style="font-size:0.75rem; color:${statusColor};">● ${isOnlineStatus ? '手動送信可能' : '通信中...'}</span>
-                    </div>`;
-                }).join('')}
-            </div>
-            <p style="font-size:0.75rem; color:var(--accent-color); margin-top:0.5rem;">※全員が「通信中」以外になると開始できます</p>
+            <label class="form-label">${isOnline ? '参加者' : '人数'}</label>
+            ${isOnline ? `
+                 <div style="padding:1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem;">
+                     ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<div>${getStatusDot(n)} ${n}</div>`).join('')}
+                 </div>
+            ` : `
+                <select id="num-players-select" class="form-control">
+                    <option value="2">2人</option><option value="3">3人</option><option value="4">4人</option>
+                </select>
+                <div id="player-inputs" style="margin-top:1rem;"></div>
+            `}
         </div>
-        ` : `
         <div class="form-group">
-            <label class="form-label">参加人数 (2-4人)</label>
-            <select id="num-players-select" class="form-control">
-                <option value="2" selected>2人</option>
-                <option value="3">3人</option>
-                <option value="4">4人</option>
-            </select>
+            <label class="form-label">指名人数</label>
+            <input type="number" id="num-rounds-input" class="form-control" value="${GameState.numRounds}">
         </div>
-        
-        <div class="form-group" id="player-names-container">
-            <label class="form-label">プレイヤーネーム</label>
-            <div class="player-name-inputs" id="player-inputs"></div>
-        </div>
-        `}
-
-        <div class="form-group">
-            <label class="form-label">指名人数 (獲得ラウンド数)</label>
-            <input type="number" id="num-rounds-input" class="form-control" value="${GameState.numRounds}" min="1" max="20">
-        </div>
-
-        <div class="form-group">
-            <div style="padding:0.75rem; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:0.5rem; color:var(--success-color); font-size:0.9rem;">
-                ✅ 選手データ読み込み済み（${dataLoaded ? GameState.csvData.length + '人' : '未読込'}）
-            </div>
-        </div>
-        
         <div class="setup-actions">
-            ${(() => {
-                const unready = GameState.playerNames.slice(1, GameState.numPlayers).filter(n => {
-                    const last = GameState.lastSeen[n] || 0;
-                    return (Date.now() - last >= 10000);
-                });
-                const canStart = unready.length === 0 && GameState.numPlayers >= 2;
-                return `<button id="start-btn" class="btn btn-primary" ${!canStart || !dataLoaded ? 'disabled' : ''} style="width: 100%; font-size: 1.25rem;">
-                    ${!canStart ? '通信待機中...' : 'ドラフトを開始する'}
-                </button>`;
-            })()}
+            <button id="start-btn" class="btn btn-primary" style="width: 100%;" ${GameState.numPlayers < 2 ? 'disabled' : ''}>開始</button>
         </div>
-        <div style="margin-top: 1.5rem; text-align:center; border-top:1px solid var(--border-color); padding-top:1rem;">
-            <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">← ホームに戻る</button>
-        </div>
+        <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%; margin-top:1rem;">戻る</button>
     `;
-    
     appContainer.appendChild(container);
 
     if (!isOnline) {
-        const numPlayersSelect = document.getElementById('num-players-select');
-        const playerInputsContainer = document.getElementById('player-inputs');
-        const currentNumPlayers = parseInt(numPlayersSelect.value, 10);
-        
-        function renderPlayerInputs(count) {
-            playerInputsContainer.innerHTML = '';
-            for (let i = 0; i < count; i++) {
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'form-control';
-                input.value = GameState.playerNames[i];
-                input.placeholder = `プレイヤー${i + 1}の名前`;
-                input.dataset.index = i;
-                input.addEventListener('input', (e) => {
-                    GameState.playerNames[i] = e.target.value || `プレイヤー${i + 1}`;
-                });
-                playerInputsContainer.appendChild(input);
+        const sel = document.getElementById('num-players-select');
+        const cont = document.getElementById('player-inputs');
+        const updateInputs = (v) => {
+            cont.innerHTML = '';
+            for(let i=0; i<v; i++) {
+                const inp = document.createElement('input');
+                inp.className = 'form-control'; inp.value = GameState.playerNames[i];
+                inp.oninput = (e) => GameState.playerNames[i] = e.target.value;
+                cont.appendChild(inp);
             }
-        }
-        renderPlayerInputs(currentNumPlayers);
-        numPlayersSelect.addEventListener('change', (e) => {
-            GameState.numPlayers = parseInt(e.target.value, 10);
-            renderPlayerInputs(GameState.numPlayers);
-        });
+        };
+        sel.onchange = (e) => { GameState.numPlayers = parseInt(e.target.value); updateInputs(GameState.numPlayers); };
+        updateInputs(GameState.numPlayers);
     }
 
-    document.getElementById('num-rounds-input').addEventListener('change', (e) => {
-        GameState.numRounds = parseInt(e.target.value, 10) || 5;
-        if (isOnline && isHost) broadcastState();
-    });
-
-    const backHomeBtn = document.getElementById('back-home-btn');
-    if (backHomeBtn) {
-        backHomeBtn.addEventListener('click', () => {
-            GameState.phase = 'connection';
-            render();
-        });
-    }
-
-    document.getElementById('start-btn').addEventListener('click', async () => {
+    document.getElementById('num-rounds-input').onchange = (e) => { GameState.numRounds = parseInt(e.target.value) || 5; };
+    document.getElementById('back-home-btn').onclick = () => { GameState.phase = 'connection'; render(); };
+    document.getElementById('start-btn').onclick = async () => {
         saveState();
-        GameState.rosters = Array(GameState.numPlayers).fill(null).map(() => []);
-        GameState.currentRound = 1;
-        GameState.currentSubRound = 1;
-        GameState.currentSelections = {};
-        GameState.confirmedPlayers = {}; // Initialize
+        GameState.rosters = Array(GameState.numPlayers).fill(0).map(()=>[]);
+        GameState.currentRound = 1; GameState.currentSubRound = 1;
         GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
-        GameState.currentPlayerTurnIndex = 0;
-        GameState.phase = 'draft_input_intermission';
+        GameState.phase = 'draft_input';
         if (isOnline && isHost) await broadcastState();
         render();
-    });
+    };
 }
 
-// Draft Input Phase
 function renderDraftInputIntermission() {
-    appContainer.innerHTML = '';
-    const currentPlayerIndex = GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex];
-    const playerName = GameState.playerNames[currentPlayerIndex];
-    
-    const isMyTurn = !isOnline || playerName === myPlayerName;
-    
-    const container = document.createElement('div');
-    container.className = 'glass-panel intermission-screen';
-    
-    let roundText = `第${GameState.currentRound}巡選択希望選手`;
-    if (GameState.currentSubRound > 1) {
-        roundText += ` (外れ${GameState.currentSubRound - 1}回目)`;
-    }
-
-    if (!isMyTurn) {
-        container.innerHTML = `
-            <h2 style="font-size: 2.5rem; margin-bottom: 1rem;"><span style="color:var(--accent-color)">他プレイヤー</span> が指名中...</h2>
-            <p style="color:var(--text-secondary); margin-bottom: 2rem; font-size: 1.25rem;">${roundText}</p>
-            <div style="padding: 1rem; border:1px solid var(--border-color); border-radius:1rem; background:rgba(255,255,255,0.05); margin-bottom: 2rem;">
-                <h4 style="margin-bottom:0.5rem;">指名状況:</h4>
-                <ul style="list-style:none; padding:0;">
-                    ${GameState.playersToDraftThisRound.map(i => {
-                        const hasSelected = !!GameState.currentSelections[i];
-                        return `<li style="margin-bottom:0.5rem; color:${hasSelected ? 'var(--success-color)' : 'var(--text-secondary)'}">
-                            ${hasSelected ? '✓' : '...'} ${GameState.playerNames[i]}
-                        </li>`;
-                    }).join('')}
-                </ul>
-            </div>
-            ${isHost ? `
-            <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid var(--border-color);">
-                <p style="font-size:0.9rem; color:var(--warning-color); margin-bottom:1rem;">（ホスト専用：プレイヤーが不在の場合は強制的にスキップさせることができます）</p>
-                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:center;">
-                    ${GameState.playersToDraftThisRound.filter(i => !GameState.currentSelections[i]).map(i => `
-                        <button class="btn btn-warning-outline skip-btn-manual" data-index="${i}">
-                             ${GameState.playerNames[i]} をパスさせる
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
-            ` : ''}
-        `;
-        appContainer.appendChild(container);
-        
-        if (isHost) {
-            document.querySelectorAll('.skip-btn-manual').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    const idx = parseInt(e.target.dataset.index, 10);
-                    const name = GameState.playerNames[idx];
-                    if (confirm(`${name} さんをスキップ（パス）させますか？`)) {
-                        saveState();
-                        GameState.currentSelections[idx] = { 
-                            id: 'skip-' + Date.now(), 
-                            name: '（選択パス）', 
-                            team: '（なし）', 
-                            position: '（なし）', 
-                            isSkip: true 
-                        };
-                        
-                        const selectionsCount = Object.keys(GameState.currentSelections).length;
-                        if (selectionsCount >= GameState.playersToDraftThisRound.length) {
-                            GameState.phase = 'draft_reveal';
-                        }
-                        
-                        await broadcastState();
-                        render();
-                    }
-                });
-            });
-        }
-    } else {
-        container.innerHTML = `
-            <h2 style="font-size: 2.5rem; margin-bottom: 1rem;">次は <span style="color:var(--accent-color)">${playerName}</span> さんの番です</h2>
-            <p style="color:var(--text-secondary); margin-bottom: 2rem; font-size: 1.25rem;">${roundText}</p>
-            <p style="margin-bottom: 3rem; color: var(--danger-color); font-weight: bold;">※他のプレイヤーは画面を見ないでください</p>
-            <button id="ready-btn" class="btn btn-primary" style="font-size: 1.5rem; padding: 1rem 3rem;">準備OK (指名を開始)</button>
-        `;
-        appContainer.appendChild(container);
-
-        document.getElementById('ready-btn').addEventListener('click', () => {
-            GameState.phase = 'draft_input';
-            render();
-        });
-    }
+    GameState.phase = 'draft_input';
+    render();
 }
 
 function renderDraftInputScreen() {
     appContainer.innerHTML = '';
-    const currentPlayerIndex = GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex];
-    const playerName = GameState.playerNames[currentPlayerIndex];
-    
-    let selectedPlayer = null;
-
+    const myIdx = GameState.playerNames.indexOf(myPlayerName);
+    const hasSelected = GameState.currentSelections[myIdx] != null;
+    const inRound = GameState.playersToDraftThisRound.includes(myIdx);
     const container = document.createElement('div');
-    container.className = 'glass-panel draft-screen';
-    
-    let roundText = `第${GameState.currentRound}巡選択希望選手`;
-    if (GameState.currentSubRound > 1) {
-        roundText += ` (外れ${GameState.currentSubRound - 1})`;
+    container.className = 'glass-panel';
+
+    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound-1) + ')' : ''}`;
+
+    if (!inRound || hasSelected) {
+        const unpicked = GameState.playersToDraftThisRound.filter(idx => !GameState.currentSelections[idx]);
+        const total = GameState.playersToDraftThisRound.length;
+        container.innerHTML = `
+            <div style="text-align:center; padding:2rem;">
+                <h2>他プレイヤーが指名中...</h2>
+                <p>${roundText}</p>
+                <div style="margin:2rem 0;">
+                    <p>指名完了: ${total - unpicked.length} / ${total}</p>
+                    <div style="height:8px; background:rgba(255,255,255,0.1); border-radius:4px; overflow:hidden;">
+                        <div style="height:100%; width:${( (total-unpicked.length)/total ) * 100}%; background:var(--accent-color);"></div>
+                    </div>
+                </div>
+                <div style="text-align:left;">
+                    ${GameState.playersToDraftThisRound.map(i => `<div>${getStatusDot(GameState.playerNames[i])} ${GameState.playerNames[i]} ${GameState.currentSelections[i] ? '✅' : '...'}</div>`).join('')}
+                </div>
+                ${isHost && unpicked.length > 0 ? `
+                    <div style="margin-top:2rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+                        <p style="font-size:0.8rem; color:var(--warning-color);">（ホスト機能: 不在者のパス）</p>
+                        ${unpicked.map(i => `<button class="btn btn-warning-outline" onclick="manualSkip(${i})" style="margin:0.2rem;">${GameState.playerNames[i]}をパス</button>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        appContainer.appendChild(container);
+        window.manualSkip = async (idx) => {
+            if(!confirm('パスさせますか？')) return;
+            GameState.currentSelections[idx] = { id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true };
+            if (Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) GameState.phase = 'draft_reveal';
+            await broadcastState(); render();
+        };
+        return;
     }
 
-    const getTeamColor = (tName) => {
-        if(tName.includes('阪神')) return {bg: '#F5C700', fg: '#000000'}; 
-        if(tName.includes('DeNA') || tName.includes('ベイスターズ')) return {bg: '#0055A5', fg: '#ffffff'}; 
-        if(tName.includes('巨人') || tName.includes('ジャイアンツ') || tName.includes('読売')) return {bg: '#F97709', fg: '#ffffff'}; 
-        if(tName.includes('中日') || tName.includes('ドラゴンズ')) return {bg: '#003595', fg: '#ffffff'}; 
-        if(tName.includes('広島') || tName.includes('カープ')) return {bg: '#FF0000', fg: '#ffffff'}; 
-        if(tName.includes('ヤクルト') || tName.includes('スワローズ')) return {bg: '#98C145', fg: '#000000'}; 
-        if(tName.includes('ソフトバンク') || tName.includes('ホークス')) return {bg: '#F9C700', fg: '#000000'}; 
-        if(tName.includes('日本ハム') || tName.includes('ファイターズ')) return {bg: '#4C7B9E', fg: '#ffffff'}; 
-        if(tName.includes('オリックス') || tName.includes('バファローズ')) return {bg: '#10284D', fg: '#ffffff'}; 
-        if(tName.includes('楽天') || tName.includes('イーグルス')) return {bg: '#860010', fg: '#ffffff'}; 
-        if(tName.includes('西武') || tName.includes('ライオンズ')) return {bg: '#1A3C6B', fg: '#ffffff'}; 
-        if(tName.includes('ロッテ') || tName.includes('マリーンズ')) return {bg: '#222222', fg: '#ffffff'}; 
-        return {bg: '#6B7280', fg: '#ffffff'}; 
-    };
-
-    const getPosColor = (pName) => {
-        if(pName.includes('投')) return {bg: '#ef4444', fg: '#ffffff'}; 
-        if(pName.includes('捕')) return {bg: '#3b82f6', fg: '#ffffff'}; 
-        if(pName.includes('内')) return {bg: '#eab308', fg: '#000000'}; 
-        if(pName.includes('外')) return {bg: '#10b981', fg: '#ffffff'}; 
-        return {bg: '#6B7280', fg: '#ffffff'};
-    };
-
-    const salaryOptions = [
-        {value: '5000', label: '5000万以上'}, 
-        {value: '10000', label: '1億以上'}, 
-        {value: '20000', label: '2億以上'}
-    ];
-
+    // Selection UI
+    let selected = null;
     container.innerHTML = `
-        <div class="draft-header">
-            <h2>${playerName} の指名</h2>
-            <p style="color:var(--text-secondary);">${roundText}</p>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>${myPlayerName} の指名</h2>
+            <span class="badge badge-accent">${roundText}</span>
         </div>
-        
-        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-bottom: 0.5rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 0.5rem; border: 1px solid var(--border-color);">
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); width:80px;">セ・リーグ:</div>
-                <div class="team-pills-container">
-                    ${(GlobalTags.ceLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `
-                        <label class="team-pill-label" style="--brand-bg: ${style.bg}; --brand-fg: ${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
-                            <span class="team-pill">${t}</span>
-                        </label>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-            
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); width:80px;">パ・リーグ:</div>
-                <div class="team-pills-container">
-                    ${(GlobalTags.paLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `
-                        <label class="team-pill-label" style="--brand-bg: ${style.bg}; --brand-fg: ${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
-                            <span class="team-pill">${t}</span>
-                        </label>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-
-            ${(GlobalTags.otherTeams || []).length > 0 ? `
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); width:80px;">その他:</div>
-                <div class="team-pills-container">
-                    ${GlobalTags.otherTeams.map(t => {
-                        const style = getTeamColor(t);
-                        return `
-                        <label class="team-pill-label" style="--brand-bg: ${style.bg}; --brand-fg: ${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
-                            <span class="team-pill">${t}</span>
-                        </label>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-            ` : ''}
-            
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); width:80px;">ポジション:</div>
-                <div class="team-pills-container">
-                    ${GlobalTags.positions.map(p => {
-                        const style = getPosColor(p);
-                        return `
-                        <label class="team-pill-label" style="--brand-bg: ${style.bg}; --brand-fg: ${style.fg};">
-                            <input type="checkbox" value="${p}" class="pos-filter-checkbox" style="display:none;">
-                            <span class="team-pill">${p}</span>
-                        </label>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-            
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); width:80px;">年俸:</div>
-                <div class="team-pills-container">
-                    ${salaryOptions.map(opt => `
-                        <label class="team-pill-label" style="--brand-bg: var(--accent-color); --brand-fg: #ffffff;">
-                            <input type="checkbox" value="${opt.value}" class="salary-filter-checkbox" style="display:none;">
-                            <span class="team-pill">${opt.label}</span>
-                        </label>
-                    `).join('')}
-                </div>
-            </div>
+        <input type="text" id="p-search" class="form-control" placeholder="検索..." style="margin:1rem 0;">
+        <div id="sel-info" style="padding:1rem; background:rgba(0,0,0,0.2); border:1px dashed var(--border-color); border-radius:1rem; margin-bottom:1rem; min-height:60px;">
+            <p style="text-align:center; color:var(--text-secondary);">選手を選択してください</p>
         </div>
-
-        <div class="search-bar">
-            <input type="text" id="player-search" class="form-control" placeholder="選手名・球団で検索">
-        </div>
-        
-        <div class="player-list-container">
+        <div style="max-height:350px; overflow-y:auto; border:1px solid var(--border-color); border-radius:0.5rem;">
             <table class="player-table">
-                <thead>
-                    <tr>
-                        <th>名前</th>
-                        <th>球団</th>
-                        <th>ポジション</th>
-                        <th>年齢</th>
-                        <th>年俸</th>
-                    </tr>
-                </thead>
-                <tbody id="player-list-body">
-                </tbody>
+                <thead style="position:sticky; top:0; background:var(--bg-card);"><tr><th>名前</th><th>球団</th><th>位置</th></tr></thead>
+                <tbody id="p-list"></tbody>
             </table>
         </div>
-        
-        <div id="selected-info-area"></div>
-        
-        <div class="setup-actions">
-            <button id="confirm-btn" class="btn btn-primary" disabled style="width: 100%; font-size: 1.25rem;">指名を確定して画面を隠す</button>
+        <div style="margin-top:1.5rem; display:flex; gap:1rem;">
+            <button id="conf-btn" class="btn btn-primary" disabled style="flex:2;">指名を確定する</button>
+            <button id="skip-btn" class="btn btn-warning-outline" style="flex:1;">パスする</button>
         </div>
     `;
-    
     appContainer.appendChild(container);
-    
-    const tbody = document.getElementById('player-list-body');
-    const searchInput = document.getElementById('player-search');
-    const selectedInfoArea = document.getElementById('selected-info-area');
-    const confirmBtn = document.getElementById('confirm-btn');
 
-    let activeFilterStr = '';
-
-    function renderPlayers() {
-        tbody.innerHTML = '';
-        const lowerFilter = activeFilterStr.toLowerCase();
-        
-        const activeTeamChecks = Array.from(document.querySelectorAll('.team-filter-checkbox:checked'));
-        const fTeams = activeTeamChecks.map(cb => cb.value);
-        
-        const activePosChecks = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked'));
-        const fPosArr = activePosChecks.map(cb => cb.value);
-        
-        const activeSalChecks = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked'));
-        const minSalary = activeSalChecks.length > 0 ? Math.min(...activeSalChecks.map(cb => parseInt(cb.value, 10))) : null;
-
-        const filtered = GameState.availablePlayers.filter(p => {
-            if (fTeams.length > 0 && !fTeams.includes(p.team)) return false;
-            if (fPosArr.length > 0 && !fPosArr.some(filterPos => p.position.includes(filterPos))) return false;
-            
-            // Salary is 'n円以上' -> greater or equal
-            if (minSalary && p.salary < minSalary) return false;
-
-            if (lowerFilter) {
-                return p.name.toLowerCase().includes(lowerFilter) || 
-                       p.team.toLowerCase().includes(lowerFilter) ||
-                       p.position.toLowerCase().includes(lowerFilter);
-            }
-            return true;
+    const list = document.getElementById('p-list'), info = document.getElementById('sel-info'), btn = document.getElementById('conf-btn');
+    const draw = (f='') => {
+        list.innerHTML = '';
+        GameState.availablePlayers.filter(p => !f || p.name.includes(f) || p.team.includes(f) || p.position.includes(f)).slice(0,50).forEach(p => {
+            const tr = document.createElement('tr'); tr.className = 'player-row';
+            if(selected && selected.id === p.id) tr.classList.add('selected');
+            tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td>`;
+            tr.onclick = () => {
+                selected = p; draw(f);
+                info.innerHTML = `<h3>${p.name} <span style="font-size:0.8rem;">(${p.team})</span></h3>`;
+                btn.disabled = false;
+            };
+            list.appendChild(tr);
         });
-
-        filtered.forEach(player => {
-            const tr = document.createElement('tr');
-            tr.className = 'player-row';
-            if (selectedPlayer && selectedPlayer.id === player.id) {
-                tr.classList.add('selected');
-            }
-            
-            const ageText = player.age ? player.age : '-';
-            const salText = player.salary ? new Intl.NumberFormat('ja-JP').format(player.salary) : '-';
-
-            tr.innerHTML = `
-                <td><strong>${player.name}</strong></td>
-                <td>${player.team}</td>
-                <td>${player.position}</td>
-                <td>${ageText}</td>
-                <td>${salText}</td>
-            `;
-            
-            tr.addEventListener('click', () => {
-                selectedPlayer = player;
-                renderPlayers(); 
-                
-                selectedInfoArea.innerHTML = `
-                    <div class="selected-player-info">
-                        <h3>選択中の選手</h3>
-                        <p style="font-size:1.5rem; font-weight:bold;">${player.name} <span style="font-size:1rem; font-weight:normal; color:var(--text-secondary)">(${player.team} - ${player.position})</span></p>
-                    </div>
-                `;
-                confirmBtn.disabled = false;
-            });
-            
-            tbody.appendChild(tr);
-        });
-    }
-
-    renderPlayers();
-
-    searchInput.addEventListener('input', (e) => {
-        activeFilterStr = e.target.value;
-        renderPlayers();
-    });
-
-    document.querySelectorAll('.team-filter-checkbox').forEach(cb => {
-        cb.addEventListener('change', renderPlayers);
-    });
-    document.querySelectorAll('.pos-filter-checkbox').forEach(cb => {
-        cb.addEventListener('change', renderPlayers);
-    });
-    document.querySelectorAll('.salary-filter-checkbox').forEach(cb => {
-        cb.addEventListener('change', renderPlayers);
-    });
-
-    confirmBtn.addEventListener('click', async () => {
-        if (!selectedPlayer) return;
-        
-        if (isOnline && !isHost) {
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = '送信中...';
-            // Send action to host
-            await sendClientAction({
-                type: 'select_player',
-                name: myPlayerName,
-                playerId: selectedPlayer.id
-            });
-            appContainer.innerHTML = '<h2 style="text-align:center; padding:3rem;">指名を送信しました。ホストの処理待ち...</h2>';
-        } else {
-            saveState();
-            
-            GameState.currentSelections[currentPlayerIndex] = selectedPlayer;
-            GameState.currentPlayerTurnIndex++;
-            
-            if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
-                GameState.phase = 'draft_reveal';
-            } else {
-                GameState.phase = 'draft_input_intermission';
-            }
-            
-            if (isOnline && isHost) await broadcastState();
-            render();
-        }
-    });
+    };
+    draw();
+    document.getElementById('p-search').oninput = (e) => draw(e.target.value);
+    const finalize = async (p) => {
+        if(isOnline) await sendClientAction({ type: 'select_player', name: myPlayerName, playerId: p.id, isSkip: !!p.isSkip });
+        GameState.currentSelections[myIdx] = p;
+        if(isHost && Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) GameState.phase = 'draft_reveal';
+        if(isOnline && isHost) await broadcastState();
+        render();
+    };
+    btn.onclick = () => finalize(selected);
+    document.getElementById('skip-btn').onclick = () => { if(confirm('パスしますか？')) finalize({id:'skip-'+Date.now(), name:'（選択パス）', team:'-', position:'-', isSkip:true}); };
 }
 
-// Draft Reveal & Lottery Phase
 function renderDraftRevealScreen() {
     appContainer.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'glass-panel';
     container.style.textAlign = 'center';
 
-    // Initialize lotteryResults if not present
-    if (!GameState.lotteryResults) GameState.lotteryResults = {};
-
-    let roundText = `第${GameState.currentRound}巡選択希望選手`;
-    if (GameState.currentSubRound > 1) {
-        roundText += ` (外れ${GameState.currentSubRound - 1})`;
-    }
-
-    let html = `
-        <div class="draft-header">
-            <h2>指名結果発表</h2>
-            <p style="color:var(--text-secondary);">${roundText}</p>
-        </div>
-        <div class="reveal-grid" id="reveal-grid"></div>
-        <div id="lottery-area" class="lottery-area"></div>
-        <div id="proceed-area" class="setup-actions" style="margin-top:2rem;"></div>
+    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound-1) + ')' : ''}`;
+    container.innerHTML = `
+        <h2 style="color:var(--accent-color);">${roundText} 結果発表</h2>
+        <div class="reveal-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:1rem; margin:2rem 0;"></div>
+        <div id="lottery-box"></div>
+        <div id="proceed-box" style="margin-top:2rem;"></div>
     `;
-
-    container.innerHTML = html;
     appContainer.appendChild(container);
 
-    const revealGrid = document.getElementById('reveal-grid');
-    const lotteryArea = document.getElementById('lottery-area');
-    const proceedBtn = document.getElementById('proceed-btn');
-
-    // Group selections by player targeted
-    const targetGroups = {}; 
-    for (const pIndex of GameState.playersToDraftThisRound) {
-        const selectedPlayer = GameState.currentSelections[pIndex];
-        if (!selectedPlayer) continue;
-        if (!targetGroups[selectedPlayer.id]) {
-            targetGroups[selectedPlayer.id] = { playerObj: selectedPlayer, nominatorIndices: [] };
-        }
-        targetGroups[selectedPlayer.id].nominatorIndices.push(pIndex);
-    }
-
-    // Render cards initially face down or immediately up
-    GameState.playersToDraftThisRound.forEach(pIndex => {
-        const selectedPlayer = GameState.currentSelections[pIndex];
-        if (!selectedPlayer) return;
+    const grid = container.querySelector('.reveal-grid');
+    GameState.playersToDraftThisRound.forEach(idx => {
+        const p = GameState.currentSelections[idx];
+        if(!p) return;
         const card = document.createElement('div');
-        card.className = 'reveal-card reveal-card-pop';
-        if (selectedPlayer.isSkip) {
-            card.style.opacity = '0.6';
-            card.style.borderStyle = 'dashed';
-            card.innerHTML = `
-                <div class="nominator-name">${GameState.playerNames[pIndex]}</div>
-                <div class="nominated-player-name" style="color:var(--text-secondary)">${selectedPlayer.name}</div>
-                <div class="nominated-player-team">PASS</div>
-            `;
-        } else {
-            card.innerHTML = `
-                <div class="nominator-name">${GameState.playerNames[pIndex]}</div>
-                <div class="nominated-player-name">${selectedPlayer.name}</div>
-                <div class="nominated-player-team">${selectedPlayer.team} - ${selectedPlayer.position}</div>
-            `;
-        }
-        revealGrid.appendChild(card);
+        card.className = 'glass-panel reveal-card-pop'; card.style.padding = '1rem';
+        card.innerHTML = `<div style="font-size:0.8rem; color:var(--text-secondary);">${GameState.playerNames[idx]}</div><div style="font-weight:bold;">${p.name}</div><div style="font-size:0.75rem;">${p.team}</div>`;
+        grid.appendChild(card);
     });
 
-    const duplicates = Object.values(targetGroups).filter(group => group.nominatorIndices.length > 1);
-    const singles = Object.values(targetGroups).filter(group => group.nominatorIndices.length === 1);
+    const groups = {};
+    Object.keys(GameState.currentSelections).forEach(idx => {
+        const p = GameState.currentSelections[idx];
+        if(!p || p.isSkip) return;
+        if(!groups[p.id]) groups[p.id] = { p, observers: [] };
+        groups[p.id].observers.push(parseInt(idx));
+    });
 
-    GameState.losers = []; 
+    const dups = Object.values(groups).filter(g => g.observers.length > 1);
+    const singles = Object.values(groups).filter(g => g.observers.length === 1);
+    const lBox = document.getElementById('lottery-box');
 
-    async function processDraft() {
-        singles.forEach(group => {
-            const winnerIndex = group.nominatorIndices[0];
-            // CRITICAL FIX: Use index-based assignment to prevent shifting
-            GameState.rosters[winnerIndex][GameState.currentRound - 1] = group.playerObj;
-            
-            if (!group.playerObj.isSkip) {
-                GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-            }
+    const run = async () => {
+        singles.forEach(g => {
+            const winIdx = g.observers[0];
+            GameState.rosters[winIdx][GameState.currentRound-1] = g.p;
+            GameState.availablePlayers = GameState.availablePlayers.filter(x => x.id !== g.p.id);
         });
-
-        if (duplicates.length === 0) {
-            lotteryArea.innerHTML = `<h3 style="color:var(--success-color); margin-top: 2rem;">重複はありませんでした！</h3>`;
-            showProceedButton();
-            return;
-        }
-
-        lotteryArea.innerHTML = `<h3 style="color:var(--warning-color); margin-top: 2rem; margin-bottom: 1rem;">重複が発生しました！抽選を行います。</h3>`;
         
-        for (const group of duplicates) {
-            await runLotteryForGroup(group);
+        for(const g of dups) {
+            const res = GameState.lotteryResults[g.p.id];
+            const div = document.createElement('div'); div.className = 'glass-panel'; div.style.margin = '1rem 0;';
+            div.innerHTML = `<h4>${g.p.name} の抽選</h4><div id="r-${g.p.id}"></div>`;
+            lBox.appendChild(div);
+            const rDiv = document.getElementById('r-' + g.p.id);
+
+            if(res) {
+                const name = GameState.playerNames[res.winnerIndex];
+                rDiv.innerHTML = `<span style="color:var(--success-color)">交渉権獲得: ${name}</span>`;
+                GameState.rosters[res.winnerIndex][GameState.currentRound-1] = g.p;
+                GameState.availablePlayers = GameState.availablePlayers.filter(x => x.id !== g.p.id);
+            } else if(isHost) {
+                const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '抽選する';
+                rDiv.appendChild(b);
+                b.onclick = async () => {
+                    b.style.display = 'none';
+                    const winIdx = g.observers[Math.floor(Math.random()*g.observers.length)];
+                    GameState.lotteryResults[g.p.id] = { winnerIndex: winIdx };
+                    await broadcastState(); render();
+                };
+            } else {
+                rDiv.innerHTML = 'ホストの抽選待ち...';
+            }
         }
+        
+        const hasPendingLottery = dups.some(g => !GameState.lotteryResults[g.p.id]);
+        if(!hasPendingLottery) showProceed();
+    };
 
-        // Safety Alignment: Ensure EVERY player in this round has a slot filled
-        // Use currentRound - 1 to ensure we are filling the correct horizontal row
-        GameState.playersToDraftThisRound.forEach(pIdx => {
-             if (!GameState.rosters[pIdx][GameState.currentRound - 1]) {
-                 GameState.rosters[pIdx][GameState.currentRound - 1] = { name: '（未指名）', isSkip: true, team: '-', position: '-' };
-             }
-        });
-
-        showProceedButton();
-    }
-
-    function runLotteryForGroup(group) {
-        return new Promise((resolve) => {
-            const lotteryBox = document.createElement('div');
-            lotteryBox.className = 'lottery-box glass-panel';
-            lotteryBox.style.marginTop = '1rem';
-            lotteryBox.style.padding = '1.5rem';
-            lotteryBox.style.background = 'rgba(245, 158, 11, 0.1)';
-            lotteryBox.style.border = '1px solid var(--warning-color)';
-            
-            const participantsText = group.nominatorIndices.map(i => GameState.playerNames[i]).join('、');
-            const existingResult = GameState.lotteryResults[group.playerObj.id];
-            
-            lotteryBox.innerHTML = `
-                <h4 style="font-size: 1.5rem; margin-bottom: 0.5rem;">${group.playerObj.name} の抽選</h4>
-                <p style="margin-bottom: 1rem; color: var(--text-secondary);">競合: ${participantsText}</p>
-                <div id="lottery-result-${group.playerObj.id}" style="font-size: 2rem; font-weight: bold; min-height: 3rem;"></div>
-                ${(!isOnline || isHost) && !existingResult ? '<button id="draw-btn-' + group.playerObj.id + '" class="btn btn-primary">抽選スタート</button>' : ''}
-            `;
-            
-            lotteryArea.appendChild(lotteryBox);
-            const resultBox = document.getElementById('lottery-result-' + group.playerObj.id);
-
-            // If result already exists (guest re-rendered after host broadcast)
-            if (existingResult) {
-                const winnerName = GameState.playerNames[existingResult.winnerIndex];
-                resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + winnerName + '</span>';
-                
-                // CRITICAL FIX: Use index-based assignment
-                GameState.rosters[existingResult.winnerIndex][GameState.currentRound - 1] = group.playerObj;
-                
-                if (!group.playerObj.isSkip) {
-                    GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-                }
-                group.nominatorIndices.forEach(idx => {
-                    if (idx !== existingResult.winnerIndex) GameState.losers.push(idx);
-                });
-                resolve();
-                return;
-            }
-
-            // Guest: show waiting message, don't resolve (will re-render on next poll)
-            if (isOnline && !isHost) {
-                resultBox.innerHTML = '<span style="color:var(--text-secondary); font-size:1.25rem;">ホストが抽選中...しばらくお待ちください 🎲</span>';
-                return;
-            }
-
-            // Host: show draw button
-            const drawBtn = document.getElementById('draw-btn-' + group.playerObj.id);
-            drawBtn.addEventListener('click', () => {
-                drawBtn.style.display = 'none';
-                
-                let ticks = 0;
-                const interval = setInterval(async () => {
-                    const randomNominator = group.nominatorIndices[Math.floor(Math.random() * group.nominatorIndices.length)];
-                    resultBox.textContent = GameState.playerNames[randomNominator];
-                    ticks++;
-                    
-                    if (ticks > 20) {
-                        clearInterval(interval);
-                        const winnerIndex = group.nominatorIndices[Math.floor(Math.random() * group.nominatorIndices.length)];
-                        
-                        resultBox.innerHTML = '<span style="color:var(--success-color)">交渉権獲得: ' + GameState.playerNames[winnerIndex] + '</span>';
-                        resultBox.classList.add('lottery-winner-anim');
-                        
-                        // CRITICAL FIX: Use index-based assignment
-                        GameState.rosters[winnerIndex][GameState.currentRound - 1] = group.playerObj;
-                        
-                        if (!group.playerObj.isSkip) {
-                            GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
-                        }
-                        
-                        // Save lottery result so guests can see it
-                        GameState.lotteryResults[group.playerObj.id] = { winnerIndex: winnerIndex };
-                        
-                        group.nominatorIndices.forEach(idx => {
-                            if (idx !== winnerIndex) GameState.losers.push(idx);
-                        });
-                        
-                        // Broadcast after each lottery so guests see results
-                        if (isOnline && isHost) await broadcastState();
-                        
-                        setTimeout(resolve, 1000);
-                    }
-                }, 100);
-                activeIntervals.push(interval);
-            });
-        });
-    }
-    setTimeout(processDraft, 1000);
+    const showProceed = () => {
+        const box = document.getElementById('proceed-box');
+        const ok = GameState.confirmedPlayers[myPlayerName];
+        if(!ok) {
+            const btn = document.createElement('button'); btn.className = 'btn btn-success'; btn.textContent = 'OK (3秒待機)';
+            box.appendChild(btn);
+            const fn = async () => { if(GameState.confirmedPlayers[myPlayerName]) return; GameState.confirmedPlayers[myPlayerName]=true; if(isOnline) await sendClientAction({type:'confirm_reveal', name:myPlayerName}); render(); };
+            btn.onclick = fn; setTimeout(fn, 3000);
+        } else {
+            const un = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
+            box.innerHTML = un.length ? `<p>他プレイヤー待機中: ${un.join(', ')}</p>` : '<p>次へ進みます...</p>';
+        }
+    };
+    run();
 }
 
 async function advanceDraft() {
-    saveState();
-    GameState.lotteryResults = {};
-    GameState.confirmedPlayers = {};
-    
-    if (GameState.losers.length > 0) {
-        GameState.playersToDraftThisRound = [...GameState.losers];
-        GameState.losers = [];
-        GameState.currentSubRound++;
-        GameState.currentPlayerTurnIndex = 0;
-        GameState.currentSelections = {};
-        GameState.phase = 'draft_input_intermission';
+    GameState.lotteryResults = {}; GameState.confirmedPlayers = {};
+    const losers = [];
+    GameState.playersToDraftThisRound.forEach(idx => {
+        if(!GameState.rosters[idx][GameState.currentRound-1]) losers.push(idx);
+    });
+
+    if(losers.length) {
+        GameState.playersToDraftThisRound = losers; GameState.currentSubRound++;
     } else {
-        GameState.currentRound++;
-        GameState.currentSubRound = 1;
+        GameState.currentRound++; GameState.currentSubRound = 1;
         GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
-        GameState.currentPlayerTurnIndex = 0;
-        GameState.currentSelections = {};
-        
-        if (GameState.currentRound > GameState.numRounds) {
-            GameState.phase = 'final_result';
-        } else {
-            GameState.phase = 'draft_input_intermission';
-        }
     }
-    if (isOnline && isHost) await broadcastState();
-    render();
+    GameState.currentSelections = {};
+    GameState.phase = (GameState.currentRound > GameState.numRounds) ? 'final_result' : 'draft_input';
+    if(isOnline && isHost) await broadcastState();
 }
 
-function showProceedButton() {
-    const revealArea = document.getElementById('proceed-area');
-    if (!revealArea) return;
-    revealArea.innerHTML = '';
-    revealArea.style.textAlign = 'center';
-
-    const isConfirmed = GameState.confirmedPlayers[myPlayerName] === true;
-
-    if (!isConfirmed) {
-        const confirmBtn = document.createElement('button');
-        confirmBtn.className = 'btn btn-success';
-        confirmBtn.textContent = '内容を確認 (OK)';
-        confirmBtn.style.fontSize = '1.25rem';
-        confirmBtn.style.padding = '1rem 3rem';
-        revealArea.appendChild(confirmBtn);
-
-        const timerText = document.createElement('p');
-        timerText.style.marginTop = '0.5rem';
-        timerText.style.color = 'var(--text-secondary)';
-        timerText.textContent = '3秒後に自動的に次へ進みます...';
-        revealArea.appendChild(timerText);
-
-        const doConfirm = () => {
-            if (GameState.confirmedPlayers[myPlayerName]) return;
-            if (isOnline) {
-                sendClientAction({ type: 'confirm_reveal', name: myPlayerName });
-            }
-            GameState.confirmedPlayers[myPlayerName] = true;
-            
-            // If offline or if host, trigger checks immediately
-            if (!isOnline || isHost) {
-                const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
-                if (unconfirmed.length === 0) {
-                    advanceDraft();
-                }
-            }
-            render();
-        };
-
-        confirmBtn.onclick = doConfirm;
-        setTimeout(doConfirm, 3000);
-    } else {
-        const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
-        if (unconfirmed.length > 0) {
-            revealArea.innerHTML = `
-                <p style="color:var(--success-color); font-size:1.2rem; margin-bottom:0.5rem;">✓ 確認済み</p>
-                <p style="color:var(--warning-color); font-size:0.9rem;">他のプレイヤーの確認を待っています: ${unconfirmed.join('、')}</p>
-            `;
-        } else {
-            revealArea.innerHTML = `<p style="color:var(--success-color); font-size:1.2rem;">✓ 全員確認済み。進行中...</p>`;
-        }
-    }
-}
-
-    // Final Result Phase
 function renderFinalResultScreen() {
-    appContainer.innerHTML = '';
-    const container = document.createElement('div');
-    container.className = 'glass-panel';
-    container.style.maxWidth = '100%';
-    
-    let html = `
-        <div class="draft-header" style="text-align:center; margin-bottom: 2rem;">
-            <h2 style="font-size: 2.5rem; color: var(--accent-color);">ドラフト完了！</h2>
-            <p style="color:var(--text-secondary); font-size: 1.25rem;">各チームの最終的な獲得選手</p>
-        </div>
-    `;
-    
-    html += generateRosterHTML();
-    
-    html += `
-        <div class="setup-actions" style="margin-top: 3rem; text-align:center;">
-            <button class="btn btn-primary" onclick="location.reload()" style="font-size: 1.25rem; padding: 1rem 3rem;">新しくやり直す</button>
-        </div>
-    `;
-    
-    container.innerHTML = html;
-    appContainer.appendChild(container);
+    appContainer.innerHTML = '<div class="glass-panel" style="text-align:center;"><h2>ドラフト完了！</h2>' + generateRosterHTML() + '<button class="btn btn-primary" onclick="location.reload()" style="margin-top:2rem;">最初に戻る</button></div>';
 }
 
-// Router
 function render() {
     updateGlobalUI();
-    switch (GameState.phase) {
-        case 'connection':
-            renderConnectionScreen();
-            break;
-        case 'setup':
-            renderSetupScreen();
-            break;
-        case 'draft_input_intermission':
-            renderDraftInputIntermission();
-            break;
-        case 'draft_input':
-            renderDraftInputScreen();
-            break;
-        case 'draft_reveal':
-            renderDraftRevealScreen();
-            break;
-        case 'final_result':
-            renderFinalResultScreen();
-            break;
-        default:
-            appContainer.innerHTML = '<h2>Unknown Phase</h2>';
-    }
+    const p = GameState.phase;
+    if(p==='connection') renderConnectionScreen();
+    else if(p==='setup') renderSetupScreen();
+    else if(p==='draft_input') renderDraftInputScreen();
+    else if(p==='draft_reveal') renderDraftRevealScreen();
+    else if(p==='final_result') renderFinalResultScreen();
 }
 
-// Initial boot
 document.addEventListener('DOMContentLoaded', () => {
-    const undoBtn = document.getElementById('undo-btn');
-    if (undoBtn) {
-        undoBtn.addEventListener('click', () => {
-            if (confirm('一つ前の操作に戻りますか？')) {
-                undoState();
-            }
-        });
-    }
-
-    const rosterBtn = document.getElementById('view-roster-btn');
-    if (rosterBtn) {
-        rosterBtn.addEventListener('click', () => {
-            renderRosterModal();
-        });
-    }
-
-    const closeRosterBtn = document.getElementById('close-roster-btn');
-    if (closeRosterBtn) {
-        closeRosterBtn.addEventListener('click', () => {
-            document.getElementById('roster-modal').style.display = 'none';
-        });
-    }
-
-    window.addEventListener('beforeunload', (e) => {
-        if (GameState.phase !== 'connection' && GameState.phase !== 'final_result') {
-            e.preventDefault();
-            e.returnValue = 'ゲーム進行中ですが、本当に終了しますか？';
-        }
-    });
-
-    // Mobile stability: re-render or re-force poll when coming back to the tab
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            // When user returns to tab, refresh UI
-            render();
-        }
-    });
-
+    document.getElementById('undo-btn').onclick = () => { if(confirm('戻しますか？')) undoState(); };
+    document.getElementById('view-roster-btn').onclick = renderRosterModal;
+    document.getElementById('close-roster-btn').onclick = () => { document.getElementById('roster-modal').style.display='none'; };
+    window.addEventListener('beforeunload', (e) => { if(GameState.phase!=='connection'&&GameState.phase!=='final_result') { e.preventDefault(); e.returnValue='終了しますか？'; }});
     render();
 });

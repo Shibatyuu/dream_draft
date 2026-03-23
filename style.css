@@ -526,3 +526,29 @@ body {
   color: var(--brand-fg, #fff);
   box-shadow: 0 0 8px var(--brand-bg, rgba(59, 130, 246, 0.5));
 }
+
+/* Badge Utilities */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-accent {
+  background: var(--accent-color);
+  color: white;
+  border-color: var(--accent-hover);
+}
+
+.badge-success {
+  background: var(--success-color);
+  color: white;
+  border: none;
+}
