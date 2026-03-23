@@ -19,13 +19,12 @@
 
 <body>
     <div id="app-container">
-        <header class="app-header"
-            style="position:relative; padding: 2.5rem 0; display:flex; justify-content:center; align-items:center;">
-            <button id="undo-btn" class="global-btn btn-warning-outline"
-                style="position:absolute; left:1rem; display: none;">← やり直す</button>
-            <h1 class="logo" style="margin:0;">DREAM DRAFT</h1>
-            <button id="view-roster-btn" class="global-btn" style="position:absolute; right:1rem; display: none;">📊
-                状況確認</button>
+        <header class="app-header">
+            <h1 class="logo">DREAM DRAFT</h1>
+            <div class="header-actions">
+                <button id="undo-btn" class="global-btn btn-warning-outline" style="display: none;">← 戻す</button>
+                <button id="view-roster-btn" class="global-btn" style="display: none;">📊 状況確認</button>
+            </div>
         </header>
         <main id="main-content" class="main-content">
             <!-- Components will be rendered here by JS -->

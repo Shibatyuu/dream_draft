@@ -502,12 +502,18 @@ function startClientPolling() {
                     if (s.currentSelectionIds) {
                         const myIdx = GameState.playerNames.indexOf(myPlayerName);
                         const localMine = GameState.currentSelections[myIdx];
+                        
+                        // Only protect if round/subRound hasn't changed
+                        const isSamePhase = (s.currentRound === GameState.currentRound && 
+                                             s.currentSubRound === GameState.currentSubRound &&
+                                             s.phase === GameState.phase);
+
                         GameState.currentSelections = {};
                         for (const k of Object.keys(s.currentSelectionIds)) {
                             GameState.currentSelections[k] = findPlayerById(s.currentSelectionIds[k]);
                         }
-                        // Protect local selection until server confirms it
-                        if (localMine && !GameState.currentSelections[myIdx]) {
+                        // Protect local selection within the same sub-round context
+                        if (isSamePhase && localMine && !GameState.currentSelections[myIdx]) {
                             GameState.currentSelections[myIdx] = localMine;
                         }
                     }
@@ -799,7 +805,7 @@ function renderDraftInputScreen() {
         </div>
         <div style="max-height:350px; overflow-y:auto; border:1px solid var(--border-color); border-radius:0.5rem;">
             <table class="player-table">
-                <thead style="position:sticky; top:0; background:var(--bg-card);"><tr><th>名前</th><th>球団</th><th>位置</th></tr></thead>
+                <thead style="position:sticky; top:0; background:var(--bg-card);"><tr><th>名前</th><th>球団</th><th>位置</th><th>年俸</th></tr></thead>
                 <tbody id="p-list"></tbody>
             </table>
         </div>
@@ -840,7 +846,7 @@ function renderDraftInputScreen() {
         }).slice(0,50).forEach(p => {
             const tr = document.createElement('tr'); tr.className = 'player-row';
             if(selected && selected.id === p.id) tr.classList.add('selected');
-            tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td>`;
+            tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td><td style="font-size:0.8rem;">${p.salary}万</td>`;
             tr.onclick = () => {
                 selected = p; draw(f);
                 info.innerHTML = `<h3>${p.name} <span style="font-size:0.8rem;">(${p.team})</span></h3>`;
