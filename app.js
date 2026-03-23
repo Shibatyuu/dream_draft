@@ -23,7 +23,8 @@ const GameState = {
     
     currentSelections: {}, 
     rosters: [[], [], [], []],
-    confirmedPlayers: {} 
+    confirmedPlayers: {},
+    losers: [] 
 };
 
 const appContainer = document.getElementById('main-content');
@@ -467,6 +468,17 @@ function startHostPolling() {
                     if (action.type === 'confirm_reveal' && GameState.phase === 'draft_reveal') {
                         GameState.confirmedPlayers[action.name] = true;
                         stateChanged = true;
+                        
+                        // Check if everyone is confirmed and auto-advance
+                        if (isHost) {
+                            const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
+                            if (unconfirmed.length === 0) {
+                                // Important: We don't await here because we'll call render() at the end of polling
+                                // but we need the state to be updated
+                                advanceDraft();
+                                stateChanged = true;
+                            }
+                        }
                     }
                 }
                 if (stateChanged) {
@@ -1200,7 +1212,7 @@ function renderDraftRevealScreen() {
     const duplicates = Object.values(targetGroups).filter(group => group.nominatorIndices.length > 1);
     const singles = Object.values(targetGroups).filter(group => group.nominatorIndices.length === 1);
 
-    const losers = []; 
+    GameState.losers = []; 
 
     async function processDraft() {
         singles.forEach(group => {
@@ -1270,7 +1282,7 @@ function renderDraftRevealScreen() {
                     GameState.availablePlayers = GameState.availablePlayers.filter(p => p.id !== group.playerObj.id);
                 }
                 group.nominatorIndices.forEach(idx => {
-                    if (idx !== existingResult.winnerIndex) losers.push(idx);
+                    if (idx !== existingResult.winnerIndex) GameState.losers.push(idx);
                 });
                 resolve();
                 return;
@@ -1311,7 +1323,7 @@ function renderDraftRevealScreen() {
                         GameState.lotteryResults[group.playerObj.id] = { winnerIndex: winnerIndex };
                         
                         group.nominatorIndices.forEach(idx => {
-                            if (idx !== winnerIndex) losers.push(idx);
+                            if (idx !== winnerIndex) GameState.losers.push(idx);
                         });
                         
                         // Broadcast after each lottery so guests see results
@@ -1325,101 +1337,86 @@ function renderDraftRevealScreen() {
         });
     }
 
+    async function advanceDraft() {
+        saveState();
+        GameState.lotteryResults = {};
+        GameState.confirmedPlayers = {};
+        
+        if (GameState.losers.length > 0) {
+            GameState.playersToDraftThisRound = [...GameState.losers];
+            GameState.losers = [];
+            GameState.currentSubRound++;
+            GameState.currentPlayerTurnIndex = 0;
+            GameState.currentSelections = {};
+            GameState.phase = 'draft_input_intermission';
+        } else {
+            GameState.currentRound++;
+            GameState.currentSubRound = 1;
+            GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
+            GameState.currentPlayerTurnIndex = 0;
+            GameState.currentSelections = {};
+            
+            if (GameState.currentRound > GameState.numRounds) {
+                GameState.phase = 'final_result';
+            } else {
+                GameState.phase = 'draft_input_intermission';
+            }
+        }
+        if (isOnline && isHost) await broadcastState();
+        render();
+    }
+
     function showProceedButton() {
-        const revealContainer = document.getElementById('proceed-area');
-        if (!revealContainer) return;
-        revealContainer.innerHTML = ''; // Clear duplicate UI
-        revealContainer.style.textAlign = 'center';
+        const revealArea = document.getElementById('proceed-area');
+        if (!revealArea) return;
+        revealArea.innerHTML = '';
+        revealArea.style.textAlign = 'center';
 
         const isConfirmed = GameState.confirmedPlayers[myPlayerName] === true;
 
-        if (isOnline && !isHost) {
-            if (!isConfirmed) {
-                const confirmBtn = document.createElement('button');
-                confirmBtn.className = 'btn btn-success';
-                confirmBtn.textContent = '確認 (OK)';
-                confirmBtn.style.fontSize = '1.25rem';
-                confirmBtn.style.padding = '1rem 3rem';
-                revealContainer.appendChild(confirmBtn);
+        if (!isConfirmed) {
+            const confirmBtn = document.createElement('button');
+            confirmBtn.className = 'btn btn-success';
+            confirmBtn.textContent = '内容を確認 (OK)';
+            confirmBtn.style.fontSize = '1.25rem';
+            confirmBtn.style.padding = '1rem 3rem';
+            revealArea.appendChild(confirmBtn);
 
-                const timerText = document.createElement('p');
-                timerText.style.marginTop = '0.5rem';
-                timerText.style.color = 'var(--text-secondary)';
-                timerText.textContent = '3秒後に自動確認されます...';
-                revealContainer.appendChild(timerText);
+            const timerText = document.createElement('p');
+            timerText.style.marginTop = '0.5rem';
+            timerText.style.color = 'var(--text-secondary)';
+            timerText.textContent = '3秒後に自動的に次へ進みます...';
+            revealArea.appendChild(timerText);
 
-                const doConfirm = () => {
-                    if (GameState.confirmedPlayers[myPlayerName]) return;
+            const doConfirm = () => {
+                if (GameState.confirmedPlayers[myPlayerName]) return;
+                if (isOnline) {
                     sendClientAction({ type: 'confirm_reveal', name: myPlayerName });
-                    GameState.confirmedPlayers[myPlayerName] = true;
-                    render();
-                };
-
-                confirmBtn.onclick = doConfirm;
-                setTimeout(doConfirm, 3000);
-            } else {
-                revealContainer.innerHTML = `<p style="color:var(--success-color); font-size:1.2rem;">✓ 確認済み。ホストの操作をお待ちください...</p>`;
-            }
-            return;
-        }
-
-        // Host Logic
-        const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
-        const allConfirmed = unconfirmed.length === 0;
-
-        if (isOnline && !allConfirmed) {
-            revealContainer.innerHTML = `<p style="color:var(--warning-color); margin-bottom:1rem;">確認待ち: ${unconfirmed.join('、')}</p>`;
-        }
-
-        const proceedBtn = document.createElement('button');
-        proceedBtn.className = 'btn btn-primary';
-        proceedBtn.textContent = '次へ進む';
-        proceedBtn.style.fontSize = '1.25rem';
-        proceedBtn.style.padding = '1rem 3rem';
-        if (isOnline && !allConfirmed) {
-            proceedBtn.disabled = true;
-            proceedBtn.style.opacity = '0.5';
-        }
-        revealContainer.appendChild(proceedBtn);
-
-        proceedBtn.onclick = async () => {
-            saveState();
-            GameState.lotteryResults = {};
-            GameState.confirmedPlayers = {}; // Reset confirmations
-            if (losers.length > 0) {
-                GameState.playersToDraftThisRound = losers;
-                GameState.currentSubRound++;
-                GameState.currentPlayerTurnIndex = 0;
-                GameState.currentSelections = {};
-                GameState.phase = 'draft_input_intermission';
-            } else {
-                GameState.currentRound++;
-                GameState.currentSubRound = 1;
-                GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
-                GameState.currentPlayerTurnIndex = 0;
-                GameState.currentSelections = {};
-                
-                if (GameState.currentRound > GameState.numRounds) {
-                    GameState.phase = 'final_result';
-                } else {
-                    GameState.phase = 'draft_input_intermission';
                 }
-            }
-            if (isOnline && isHost) {
-                // Also auto-confirm host if online
                 GameState.confirmedPlayers[myPlayerName] = true;
-                await broadcastState();
-            }
-            render();
-        };
-
-        // If online and host, auto-confirm host after a short delay so they don't have to click "confirm" themselves
-        if (isOnline && isHost && !GameState.confirmedPlayers[myPlayerName]) {
-            setTimeout(async () => {
-                GameState.confirmedPlayers[myPlayerName] = true;
-                await broadcastState();
+                
+                // If offline or if host, trigger checks immediately
+                if (!isOnline || isHost) {
+                    const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
+                    if (unconfirmed.length === 0) {
+                        advanceDraft();
+                    }
+                }
                 render();
-            }, 500);
+            };
+
+            confirmBtn.onclick = doConfirm;
+            setTimeout(doConfirm, 3000);
+        } else {
+            const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
+            if (unconfirmed.length > 0) {
+                revealArea.innerHTML = `
+                    <p style="color:var(--success-color); font-size:1.2rem; margin-bottom:0.5rem;">✓ 確認済み</p>
+                    <p style="color:var(--warning-color); font-size:0.9rem;">他のプレイヤーの確認を待っています: ${unconfirmed.join('、')}</p>
+                `;
+            } else {
+                revealArea.innerHTML = `<p style="color:var(--success-color); font-size:1.2rem;">✓ 全員確認済み。進行中...</p>`;
+            }
         }
     }
 
