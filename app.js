@@ -441,17 +441,23 @@ function startHostPolling() {
                     }
 
                     if (action.type === 'select_player' && (GameState.phase === 'draft_input' || GameState.phase === 'draft_input_intermission')) {
-                        const currentPlayerIndex = GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex];
-                        if (GameState.playerNames[currentPlayerIndex] === action.name) {
+                        const senderIndex = GameState.playerNames.indexOf(action.name);
+                        if (GameState.playersToDraftThisRound.includes(senderIndex) && !GameState.currentSelections[senderIndex]) {
                             saveState();
                             const resolvedPlayer = findPlayerById(action.playerId) || action.payload;
                             if (resolvedPlayer) {
-                                GameState.currentSelections[currentPlayerIndex] = resolvedPlayer;
-                                GameState.currentPlayerTurnIndex++;
-                                if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
+                                GameState.currentSelections[senderIndex] = resolvedPlayer;
+                                
+                                // Check if all players in this sub-round have selected
+                                const selectionsCount = Object.keys(GameState.currentSelections).length;
+                                if (selectionsCount >= GameState.playersToDraftThisRound.length) {
                                     GameState.phase = 'draft_reveal';
                                 } else {
-                                    GameState.phase = 'draft_input_intermission';
+                                    // Move currentPlayerTurnIndex to the next person who hasn't picked yet (for UI display)
+                                    while (GameState.currentPlayerTurnIndex < GameState.playersToDraftThisRound.length && 
+                                           GameState.currentSelections[GameState.playersToDraftThisRound[GameState.currentPlayerTurnIndex]]) {
+                                        GameState.currentPlayerTurnIndex++;
+                                    }
                                 }
                                 stateChanged = true;
                             }
@@ -780,36 +786,58 @@ function renderDraftInputIntermission() {
 
     if (!isMyTurn) {
         container.innerHTML = `
-            <h2 style="font-size: 2.5rem; margin-bottom: 1rem;"><span style="color:var(--accent-color)">${playerName}</span> さんが指名中...</h2>
+            <h2 style="font-size: 2.5rem; margin-bottom: 1rem;"><span style="color:var(--accent-color)">他プレイヤー</span> が指名中...</h2>
             <p style="color:var(--text-secondary); margin-bottom: 2rem; font-size: 1.25rem;">${roundText}</p>
-            <p style="color: var(--text-secondary); margin-bottom: 2rem;">しばらくお待ちください。</p>
+            <div style="padding: 1rem; border:1px solid var(--border-color); border-radius:1rem; background:rgba(255,255,255,0.05); margin-bottom: 2rem;">
+                <h4 style="margin-bottom:0.5rem;">指名状況:</h4>
+                <ul style="list-style:none; padding:0;">
+                    ${GameState.playersToDraftThisRound.map(i => {
+                        const hasSelected = !!GameState.currentSelections[i];
+                        return `<li style="margin-bottom:0.5rem; color:${hasSelected ? 'var(--success-color)' : 'var(--text-secondary)'}">
+                            ${hasSelected ? '✓' : '...'} ${GameState.playerNames[i]}
+                        </li>`;
+                    }).join('')}
+                </ul>
+            </div>
             ${isHost ? `
             <div style="margin-top:2rem; padding-top:2rem; border-top:1px solid var(--border-color);">
-                <p style="font-size:0.9rem; color:var(--warning-color); margin-bottom:1rem;">（ホスト専用：プレイヤーが不在の場合は以下から強制的にパスさせることができます）</p>
-                <button id="force-skip-btn" class="btn btn-warning-outline">強制的にパス（スキップ）させる</button>
+                <p style="font-size:0.9rem; color:var(--warning-color); margin-bottom:1rem;">（ホスト専用：プレイヤーが不在の場合は強制的にスキップさせることができます）</p>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:center;">
+                    ${GameState.playersToDraftThisRound.filter(i => !GameState.currentSelections[i]).map(i => `
+                        <button class="btn btn-warning-outline skip-btn-manual" data-index="${i}">
+                             ${GameState.playerNames[i]} をパスさせる
+                        </button>
+                    `).join('')}
+                </div>
             </div>
             ` : ''}
         `;
         appContainer.appendChild(container);
         
         if (isHost) {
-            document.getElementById('force-skip-btn').addEventListener('click', async () => {
-                if (confirm(`${playerName} さんをスキップ（パス）させますか？\nこの回の指名は「未指名」として処理されます。`)) {
-                    saveState();
-                    GameState.currentSelections[currentPlayerIndex] = { 
-                        id: 'skip-' + Date.now(), 
-                        name: '（選択パス）', 
-                        team: '（なし）', 
-                        position: '（なし）', 
-                        isSkip: true 
-                    };
-                    GameState.currentPlayerTurnIndex++;
-                    if (GameState.currentPlayerTurnIndex >= GameState.playersToDraftThisRound.length) {
-                        GameState.phase = 'draft_reveal';
+            document.querySelectorAll('.skip-btn-manual').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const idx = parseInt(e.target.dataset.index, 10);
+                    const name = GameState.playerNames[idx];
+                    if (confirm(`${name} さんをスキップ（パス）させますか？`)) {
+                        saveState();
+                        GameState.currentSelections[idx] = { 
+                            id: 'skip-' + Date.now(), 
+                            name: '（選択パス）', 
+                            team: '（なし）', 
+                            position: '（なし）', 
+                            isSkip: true 
+                        };
+                        
+                        const selectionsCount = Object.keys(GameState.currentSelections).length;
+                        if (selectionsCount >= GameState.playersToDraftThisRound.length) {
+                            GameState.phase = 'draft_reveal';
+                        }
+                        
+                        await broadcastState();
+                        render();
                     }
-                    await broadcastState();
-                    render();
-                }
+                });
             });
         }
     } else {
@@ -1124,9 +1152,7 @@ function renderDraftRevealScreen() {
         </div>
         <div class="reveal-grid" id="reveal-grid"></div>
         <div id="lottery-area" class="lottery-area"></div>
-        <div class="setup-actions">
-            <button id="proceed-btn" class="btn btn-primary" style="display:none; font-size: 1.25rem; padding: 1rem 3rem;">次へ進む</button>
-        </div>
+        <div id="proceed-area" class="setup-actions" style="margin-top:2rem;"></div>
     `;
 
     container.innerHTML = html;
@@ -1300,10 +1326,10 @@ function renderDraftRevealScreen() {
     }
 
     function showProceedButton() {
-        const revealContainer = document.createElement('div');
-        revealContainer.style.marginTop = '2rem';
+        const revealContainer = document.getElementById('proceed-area');
+        if (!revealContainer) return;
+        revealContainer.innerHTML = ''; // Clear duplicate UI
         revealContainer.style.textAlign = 'center';
-        appContainer.appendChild(revealContainer);
 
         const isConfirmed = GameState.confirmedPlayers[myPlayerName] === true;
 
