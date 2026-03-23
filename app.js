@@ -719,11 +719,11 @@ function renderDraftInputScreen() {
             <span class="badge badge-accent">${roundText}</span>
         </div>
         
-        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 0.5rem; border: 1px solid var(--border-color);">
+        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 0.5rem; border: 1px solid var(--border-color); overflow-x: auto;">
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">球団:</div>
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">セ:</div>
                 <div class="team-pills-container">
-                    ${[...(GlobalTags.ceLeagueTeams || []), ...(GlobalTags.paLeagueTeams || []), ...(GlobalTags.otherTeams || [])].map(t => {
+                    ${(GlobalTags.ceLeagueTeams || []).map(t => {
                         const style = getTeamColor(t);
                         return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
                             <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
@@ -733,7 +733,33 @@ function renderDraftInputScreen() {
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">位置:</div>
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">パ:</div>
+                <div class="team-pills-container">
+                    ${(GlobalTags.paLeagueTeams || []).map(t => {
+                        const style = getTeamColor(t);
+                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+                            <span class="team-pill">${t}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+            </div>
+            ${(GlobalTags.otherTeams || []).length > 0 ? `
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">他:</div>
+                <div class="team-pills-container">
+                    ${GlobalTags.otherTeams.map(t => {
+                        const style = getTeamColor(t);
+                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+                            <span class="team-pill">${t}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+            </div>
+            ` : ''}
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">位置:</div>
                 <div class="team-pills-container">
                     ${GlobalTags.positions.map(p => {
                         const style = getPosColor(p);
@@ -745,11 +771,16 @@ function renderDraftInputScreen() {
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:50px;">年俸:</div>
+                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">年俸:</div>
                 <div class="team-pills-container">
-                    ${[5000, 10000, 20000].map(v => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
-                        <input type="checkbox" value="${v}" class="salary-filter-checkbox" style="display:none;">
-                        <span class="team-pill">${v/10000}億以上</span>
+                    ${[
+                        {label:'~5000万', range:'0-5000'},
+                        {label:'5000万~1億', range:'5001-10000'},
+                        {label:'1億~3億', range:'10001-30000'},
+                        {label:'3億~', range:'30001-999999'}
+                    ].map(opt => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
+                        <input type="checkbox" value="${opt.range}" class="salary-filter-checkbox" style="display:none;">
+                        <span class="team-pill">${opt.label}</span>
                     </label>`).join('')}
                 </div>
             </div>
@@ -779,13 +810,19 @@ function renderDraftInputScreen() {
         
         const fTeams = Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(cb => cb.value);
         const fPosArr = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(cb => cb.value);
-        const activeSalChecks = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked'));
-        const minSalary = activeSalChecks.length > 0 ? Math.min(...activeSalChecks.map(cb => parseInt(cb.value, 10))) : null;
+        const fSalaries = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked')).map(cb => cb.value);
 
         GameState.availablePlayers.filter(p => {
             if (fTeams.length > 0 && !fTeams.includes(p.team)) return false;
             if (fPosArr.length > 0 && !fPosArr.some(filterPos => p.position.includes(filterPos))) return false;
-            if (minSalary && p.salary < minSalary) return false;
+            
+            if (fSalaries.length > 0) {
+                const match = fSalaries.some(rangeStr => {
+                    const [min, max] = rangeStr.split('-').map(Number);
+                    return p.salary >= min && p.salary <= max;
+                });
+                if (!match) return false;
+            }
             
             if (lowerFilter) {
                 return p.name.toLowerCase().includes(lowerFilter) || 
