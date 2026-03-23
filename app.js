@@ -22,7 +22,8 @@ const GameState = {
     availablePlayers: [],
     
     currentSelections: {}, 
-    rosters: [[], [], [], []]
+    rosters: [[], [], [], []],
+    confirmedPlayers: {} 
 };
 
 const appContainer = document.getElementById('main-content');
@@ -108,6 +109,7 @@ function generateRosterHTML() {
                 <span style="color:var(--text-secondary)">選択数</span> <strong>${count} 人</strong>
                 <span style="color:var(--text-secondary)">選択球団</span> <strong>${draftedNPBTeams.size} 球団</strong>
                 <span style="color:var(--text-secondary)">年俸総額</span> <strong>${totalSalary > 0 ? formatMoney(totalSalary) : '-'}</strong>
+                <span style="color:var(--text-secondary)">平均年俸</span> <strong>${count > 0 ? formatMoney((totalSalary / count).toFixed(0)) : '-'}</strong>
                 <span style="color:var(--text-secondary)">平均年齢</span> <strong>${avgAge} 歳</strong>
             </div>
             <div style="font-size: 0.8rem; margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.5rem; color: var(--text-secondary);">
@@ -455,6 +457,11 @@ function startHostPolling() {
                             }
                         }
                     }
+
+                    if (action.type === 'confirm_reveal' && GameState.phase === 'draft_reveal') {
+                        GameState.confirmedPlayers[action.name] = true;
+                        stateChanged = true;
+                    }
                 }
                 if (stateChanged) {
                     await broadcastState();
@@ -746,6 +753,7 @@ function renderSetupScreen() {
         GameState.currentRound = 1;
         GameState.currentSubRound = 1;
         GameState.currentSelections = {};
+        GameState.confirmedPlayers = {}; // Initialize
         GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
         GameState.currentPlayerTurnIndex = 0;
         GameState.phase = 'draft_input_intermission';
@@ -1292,17 +1300,66 @@ function renderDraftRevealScreen() {
     }
 
     function showProceedButton() {
+        const revealContainer = document.createElement('div');
+        revealContainer.style.marginTop = '2rem';
+        revealContainer.style.textAlign = 'center';
+        appContainer.appendChild(revealContainer);
+
+        const isConfirmed = GameState.confirmedPlayers[myPlayerName] === true;
+
         if (isOnline && !isHost) {
-            proceedBtn.style.display = 'block';
-            proceedBtn.disabled = true;
-            proceedBtn.textContent = 'ホストが次に進むのをお待ちください...';
-            proceedBtn.style.opacity = '0.5';
+            if (!isConfirmed) {
+                const confirmBtn = document.createElement('button');
+                confirmBtn.className = 'btn btn-success';
+                confirmBtn.textContent = '確認 (OK)';
+                confirmBtn.style.fontSize = '1.25rem';
+                confirmBtn.style.padding = '1rem 3rem';
+                revealContainer.appendChild(confirmBtn);
+
+                const timerText = document.createElement('p');
+                timerText.style.marginTop = '0.5rem';
+                timerText.style.color = 'var(--text-secondary)';
+                timerText.textContent = '3秒後に自動確認されます...';
+                revealContainer.appendChild(timerText);
+
+                const doConfirm = () => {
+                    if (GameState.confirmedPlayers[myPlayerName]) return;
+                    sendClientAction({ type: 'confirm_reveal', name: myPlayerName });
+                    GameState.confirmedPlayers[myPlayerName] = true;
+                    render();
+                };
+
+                confirmBtn.onclick = doConfirm;
+                setTimeout(doConfirm, 3000);
+            } else {
+                revealContainer.innerHTML = `<p style="color:var(--success-color); font-size:1.2rem;">✓ 確認済み。ホストの操作をお待ちください...</p>`;
+            }
             return;
         }
-        proceedBtn.style.display = 'block';
+
+        // Host Logic
+        const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(name => !GameState.confirmedPlayers[name]);
+        const allConfirmed = unconfirmed.length === 0;
+
+        if (isOnline && !allConfirmed) {
+            revealContainer.innerHTML = `<p style="color:var(--warning-color); margin-bottom:1rem;">確認待ち: ${unconfirmed.join('、')}</p>`;
+        }
+
+        const proceedBtn = document.createElement('button');
+        proceedBtn.className = 'btn btn-primary';
+        proceedBtn.textContent = '次へ進む';
+        proceedBtn.style.fontSize = '1.25rem';
+        proceedBtn.style.padding = '1rem 3rem';
+        if (isOnline && !allConfirmed) {
+            proceedBtn.disabled = true;
+            proceedBtn.style.opacity = '0.5';
+        }
+        revealContainer.appendChild(proceedBtn);
+
         proceedBtn.onclick = async () => {
             saveState();
             GameState.lotteryResults = {};
+            GameState.confirmedPlayers = {}; // Reset confirmations
             if (losers.length > 0) {
                 GameState.playersToDraftThisRound = losers;
                 GameState.currentSubRound++;
@@ -1322,9 +1379,22 @@ function renderDraftRevealScreen() {
                     GameState.phase = 'draft_input_intermission';
                 }
             }
-            if (isOnline && isHost) await broadcastState();
+            if (isOnline && isHost) {
+                // Also auto-confirm host if online
+                GameState.confirmedPlayers[myPlayerName] = true;
+                await broadcastState();
+            }
             render();
         };
+
+        // If online and host, auto-confirm host after a short delay so they don't have to click "confirm" themselves
+        if (isOnline && isHost && !GameState.confirmedPlayers[myPlayerName]) {
+            setTimeout(async () => {
+                GameState.confirmedPlayers[myPlayerName] = true;
+                await broadcastState();
+                render();
+            }, 500);
+        }
     }
 
     setTimeout(processDraft, 1000);
