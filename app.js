@@ -305,6 +305,8 @@ function renderConnectionScreen() {
             roomId = data.room_id;
             clientId = data.client_id;
             
+            myIdx = 0;
+            console.log(`Room created: ${roomId}. You are Host (Index 0).`);
             GameState.phase = 'setup';
             await broadcastState();
             startHostPolling();
@@ -340,6 +342,7 @@ function renderConnectionScreen() {
                 isOnline = true;
                 isHost = false;
                 roomId = jId;
+                console.log(`Joined room: ${jId} as ${jName}. Waiting for index...`);
                 startClientPolling();
             } else {
                 statusEl.textContent = 'ルームに参加できません。';
@@ -367,6 +370,16 @@ function startHostPolling() {
             });
             const data = await res.json();
             let stateChanged = false;
+
+            // Sync basic state components if they exist in the response
+            if (data.state) {
+                const s = data.state;
+                if (s.playerNames && s.playerNames.length > GameState.playerNames.length) {
+                    GameState.playerNames = s.playerNames;
+                    GameState.numPlayers = s.numPlayers || GameState.playerNames.length;
+                    stateChanged = true;
+                }
+            }
 
             if (data.actions) {
                 for(let action of data.actions) {
@@ -415,12 +428,13 @@ function startHostPolling() {
                 GameState.playerStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
             });
 
-            // Auto-advance if everyone picking
+            // Draft Input -> Reveal
             if (GameState.phase === 'draft_input') {
-                const pickedCount = Object.keys(GameState.currentSelections).length;
+                const pickedCount = GameState.playersToDraftThisRound.filter(idx => GameState.currentSelections[idx]).length;
                 if (GameState.playersToDraftThisRound.length > 0 && pickedCount >= GameState.playersToDraftThisRound.length) {
                     GameState.phase = 'draft_reveal';
                     autoChanged = true;
+                    console.log(`Auto-advancing to Reveal phase. Count: ${pickedCount}/${GameState.playersToDraftThisRound.length}`);
                 }
             }
 
@@ -524,12 +538,18 @@ function startClientPolling() {
                         const set = new Set(s.availablePlayerIds);
                         GameState.availablePlayers = GameState.csvData.filter(p => set.has(p.id));
                     }
-                    if (s.rosterIds) {
-                        GameState.rosters = s.rosterIds.map(r => r.map(id => findPlayerById(id)));
+                    if (s.playerNames) {
+                        GameState.playerNames = s.playerNames;
+                        GameState.numPlayers = s.numPlayers || s.playerNames.length;
+                        const newIdx = GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === myPlayerName.trim().toLowerCase());
+                        if (newIdx !== -1 && newIdx !== myIdx) {
+                            myIdx = newIdx;
+                            console.log(`My index determined: ${myIdx} (${myPlayerName})`);
+                        }
                     }
                     if (s.currentSelectionIds) {
-                        const myIdx = GameState.playerNames.indexOf(myPlayerName);
-                        const localMine = GameState.currentSelections[myIdx];
+                        const guestIdx = myIdx === -1 ? GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === myPlayerName.trim().toLowerCase()) : myIdx;
+                        const localMine = (guestIdx !== -1) ? GameState.currentSelections[guestIdx] : null;
                         
                         // Only protect if round/subRound hasn't changed
                         const isSamePhase = (s.currentRound === GameState.currentRound && 
@@ -541,8 +561,8 @@ function startClientPolling() {
                             GameState.currentSelections[k] = findPlayerById(s.currentSelectionIds[k]);
                         }
                         // Protect local selection within the same sub-round context
-                        if (isSamePhase && localMine && !GameState.currentSelections[myIdx]) {
-                            GameState.currentSelections[myIdx] = localMine;
+                        if (isSamePhase && localMine && guestIdx !== -1 && !GameState.currentSelections[guestIdx]) {
+                            GameState.currentSelections[guestIdx] = localMine;
                         }
                     }
                     const skip = new Set(['availablePlayerIds', 'rosterIds', 'currentSelectionIds', 'csvData', 'availablePlayers', 'rosters', 'currentSelections']);
