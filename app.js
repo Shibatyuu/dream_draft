@@ -371,7 +371,6 @@ function startHostPolling() {
             const data = await res.json();
             let stateChanged = false;
 
-            // Sync basic state components if they exist in the response
             if (data.state) {
                 const s = data.state;
                 if (s.playerNames && s.playerNames.length > GameState.playerNames.length) {
@@ -392,22 +391,18 @@ function startHostPolling() {
                     }
                     if (action.type === 'ping') {
                         GameState.lastSeen[action.name] = Date.now();
-                        stateChanged = true;
+                        // Ping alone doesn't trigger stateChanged to reduce broadcast noise
                     }
                     if (action.type === 'select_player' && GameState.phase === 'draft_input') {
                         const guestName = (action.name || '').trim().toLowerCase();
                         const idx = GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === guestName);
-                        
-                        // Validate index and round/sub-round context if provided
                         const isCorrectContext = (!action.round || action.round === GameState.currentRound) && 
                                                  (!action.subRound || action.subRound === GameState.currentSubRound);
-
                         if (idx !== -1 && GameState.playersToDraftThisRound.includes(idx) && !GameState.currentSelections[idx] && isCorrectContext) {
                             const p = findPlayerById(action.playerId) || (action.isSkip ? { id: action.playerId, name: '（選択パス）', team: '-', position: '-', isSkip: true } : null);
                             if (p) {
                                 GameState.currentSelections[idx] = p;
                                 stateChanged = true;
-                                console.log(`Host recorded selection for player index ${idx}: ${p.name}`);
                             }
                         }
                     }
@@ -418,34 +413,32 @@ function startHostPolling() {
                 }
             }
 
-            // --- Phase Checks (Always run these even if no new actions were polled) ---
             let autoChanged = false;
-
-            // Online status calculation
-            GameState.playerStatus = {};
+            // Online status calculation - only broadcast if status actually changes
+            const newStatus = {};
             GameState.playerNames.slice(0, GameState.numPlayers).forEach(n => {
                 const last = GameState.lastSeen[n] || 0;
-                GameState.playerStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
+                newStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
             });
+            if (JSON.stringify(newStatus) !== JSON.stringify(GameState.playerStatus)) {
+                GameState.playerStatus = newStatus;
+                autoChanged = true;
+            }
 
-            // Draft Input -> Reveal
+            // Phase transition checks
             if (GameState.phase === 'draft_input') {
                 const pickedCount = GameState.playersToDraftThisRound.filter(idx => GameState.currentSelections[idx]).length;
                 if (GameState.playersToDraftThisRound.length > 0 && pickedCount >= GameState.playersToDraftThisRound.length) {
                     GameState.phase = 'draft_reveal';
                     autoChanged = true;
-                    console.log(`Auto-advancing to Reveal phase. Count: ${pickedCount}/${GameState.playersToDraftThisRound.length}`);
                 }
             }
-
-            // Auto-advance if everyone confirmed
             if (GameState.phase === 'draft_reveal') {
                 const isLotteryRunning = GameState.activeLottery != null;
                 if (!isLotteryRunning) {
                     const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
                     const dups = getDuplicateGroups();
                     const allLotteriesDone = dups.every(g => GameState.lotteryResults[g.p.id]);
-
                     if (unconfirmed.length === 0 && allLotteriesDone) {
                         advanceDraft();
                         autoChanged = true;
@@ -729,6 +722,9 @@ const getPosColor = (pName) => {
 };
 
 function renderDraftInputScreen() {
+    const wasFocused = document.activeElement && document.activeElement.id === 'p-search';
+    const lastSearch = document.getElementById('p-search') ? document.getElementById('p-search').value : (window._lastSearch || '');
+
     appContainer.innerHTML = '';
     const myIdx = GameState.playerNames.indexOf(myPlayerName);
     const hasSelected = GameState.currentSelections[myIdx] != null;
@@ -903,10 +899,21 @@ function renderDraftInputScreen() {
             list.appendChild(tr);
         });
     };
-    draw();
-    document.getElementById('p-search').oninput = (e) => draw(e.target.value);
+    const pSearch = document.getElementById('p-search');
+    pSearch.oninput = (e) => draw(e.target.value);
+    if (lastSearch) {
+        pSearch.value = lastSearch;
+        draw(lastSearch);
+    }
+    pSearch.addEventListener('blur', (e) => { window._lastSearch = e.target.value; });
+
+    if (wasFocused) {
+        pSearch.focus();
+        pSearch.setSelectionRange(pSearch.value.length, pSearch.value.length);
+    }
+
     document.querySelectorAll('.team-filter-checkbox, .pos-filter-checkbox, .salary-filter-checkbox').forEach(cb => {
-        cb.onchange = () => draw(document.getElementById('p-search').value);
+        cb.onchange = () => draw(pSearch.value);
     });
     const finalize = async (p) => {
         if(isOnline) await sendClientAction({ 
