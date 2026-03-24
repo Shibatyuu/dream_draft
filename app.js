@@ -721,6 +721,25 @@ const getPosColor = (pName) => {
     return { bg: '#6B7280', fg: '#ffffff' };
 };
 
+function renderOfflineIntermission(nextIdx) {
+    appContainer.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'glass-panel';
+    container.style.textAlign = 'center';
+    container.style.padding = '3rem 1rem';
+    
+    container.innerHTML = `
+        <h2 style="color:var(--accent-color); font-size:1.8rem;">指名完了</h2>
+        <p style="margin:2rem 0; font-size:1.2rem; color:var(--text-secondary);">デバイスを <strong>${GameState.playerNames[nextIdx]}</strong> さんに渡してください。</p>
+        <button id="start-my-turn-btn" class="btn btn-primary" style="width:100%; padding:1.5rem; font-size:1.5rem;">${GameState.playerNames[nextIdx]} さんの番を始める</button>
+    `;
+    appContainer.appendChild(container);
+    document.getElementById('start-my-turn-btn').onclick = () => {
+        GameState.phase = 'draft_input';
+        render();
+    };
+}
+
 function renderDraftInputScreen() {
     const wasFocused = document.activeElement && document.activeElement.id === 'p-search';
     const lastSearch = document.getElementById('p-search') ? document.getElementById('p-search').value : (window._lastSearch || '');
@@ -901,11 +920,11 @@ function renderDraftInputScreen() {
     };
     const pSearch = document.getElementById('p-search');
     pSearch.oninput = (e) => draw(e.target.value);
-    
+
     // Restore search value and initial draw
     pSearch.value = lastSearch;
     draw(lastSearch);
-    
+
     pSearch.addEventListener('blur', (e) => { window._lastSearch = e.target.value; });
 
     if (wasFocused) {
@@ -931,16 +950,18 @@ function renderDraftInputScreen() {
                 GameState.phase = 'draft_reveal';
             }
             if (isOnline && isHost) await broadcastState();
+            render();
         } else {
-            // Offline turn-based logic
+            // Offline turn-based logic with Intermission
             GameState.currentSelections[GameState.currentTurn] = p;
             if (GameState.currentTurn < GameState.numPlayers - 1) {
                 GameState.currentTurn++;
+                renderOfflineIntermission(GameState.currentTurn);
             } else {
                 GameState.phase = 'draft_reveal';
+                render();
             }
         }
-        render();
     };
     btn.onclick = () => finalize(selected);
     document.getElementById('skip-btn').onclick = () => { if (confirm('パスしますか？')) finalize({ id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true }); };

@@ -542,7 +542,22 @@ body {
   background: var(--brand-bg, var(--accent-color));
   border-color: var(--brand-bg, var(--accent-hover));
   color: var(--brand-fg, #fff);
-  box-shadow: 0 0 8px var(--brand-bg, rgba(59, 130, 246, 0.5));
+  box-shadow: 0 0 12px var(--brand-bg, var(--accent-color)), 0 0 4px var(--brand-bg, var(--accent-color));
+  transform: translateY(-2px);
+  font-weight: 800;
+}
+
+.team-pill-label[style*="F5C700"] .team-filter-checkbox:checked + .team-pill {
+  background: repeating-linear-gradient(
+    135deg,
+    #f5c700,
+    #f5c700 8px,
+    #000 8px,
+    #000 12px
+  ) !important;
+  color: #fff !important;
+  text-shadow: 1px 1px 2px #000;
+  border: 1px solid #000;
 }
 
 /* Badge Utilities */
