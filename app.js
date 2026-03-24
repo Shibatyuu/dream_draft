@@ -366,8 +366,9 @@ function startHostPolling() {
                 body: JSON.stringify({ room_id: roomId, client_id: clientId })
             });
             const data = await res.json();
+            let stateChanged = false;
+
             if (data.actions) {
-                let stateChanged = false;
                 for(let action of data.actions) {
                     if (action.type === 'join' && GameState.phase === 'setup') {
                         if (GameState.numPlayers < 4 && !GameState.playerNames.includes(action.name)) {
@@ -395,41 +396,61 @@ function startHostPolling() {
                         stateChanged = true;
                     }
                 }
+            }
 
-                // Check for online status
-                GameState.playerStatus = {};
-                GameState.playerNames.slice(0, GameState.numPlayers).forEach(n => {
-                    const last = GameState.lastSeen[n] || 0;
-                    GameState.playerStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
-                });
+            // --- Phase Checks (Always run these even if no new actions were polled) ---
+            let autoChanged = false;
 
-                // Auto-advance if everyone picking
-                if (GameState.phase === 'draft_input') {
-                    const pickedCount = Object.keys(GameState.currentSelections).length;
-                    if (pickedCount >= GameState.playersToDraftThisRound.length && GameState.playersToDraftThisRound.length > 0) {
-                        GameState.phase = 'draft_reveal';
-                        stateChanged = true;
-                    }
+            // Online status calculation
+            GameState.playerStatus = {};
+            GameState.playerNames.slice(0, GameState.numPlayers).forEach(n => {
+                const last = GameState.lastSeen[n] || 0;
+                GameState.playerStatus[n] = (n === myPlayerName) || (Date.now() - last < 10000);
+            });
+
+            // Auto-advance if everyone picking
+            if (GameState.phase === 'draft_input') {
+                const pickedCount = Object.keys(GameState.currentSelections).length;
+                if (GameState.playersToDraftThisRound.length > 0 && pickedCount >= GameState.playersToDraftThisRound.length) {
+                    GameState.phase = 'draft_reveal';
+                    autoChanged = true;
                 }
+            }
 
-                // Auto-advance if everyone confirmed
-                if (GameState.phase === 'draft_reveal') {
+            // Auto-advance if everyone confirmed
+            if (GameState.phase === 'draft_reveal') {
+                const isLotteryRunning = GameState.activeLottery != null;
+                if (!isLotteryRunning) {
                     const unconfirmed = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
-                    if (unconfirmed.length === 0) {
+                    const dups = getDuplicateGroups();
+                    const allLotteriesDone = dups.every(g => GameState.lotteryResults[g.p.id]);
+
+                    if (unconfirmed.length === 0 && allLotteriesDone) {
                         advanceDraft();
-                        stateChanged = true;
+                        autoChanged = true;
                     }
                 }
+            }
 
-                if (stateChanged) {
-                    await broadcastState();
-                    render();
-                }
+            if (stateChanged || autoChanged) {
+                await broadcastState();
+                render();
             }
         } catch (e) {
             console.error('Host polling error', e);
         }
     }, 3000);
+}
+
+function getDuplicateGroups() {
+    const groups = {};
+    Object.keys(GameState.currentSelections).forEach(idx => {
+        const p = GameState.currentSelections[idx];
+        if(!p || p.isSkip) return;
+        if(!groups[p.id]) groups[p.id] = { p, observers: [] };
+        groups[p.id].observers.push(parseInt(idx));
+    });
+    return Object.values(groups).filter(g => g.observers.length > 1);
 }
 
 async function broadcastState() {
