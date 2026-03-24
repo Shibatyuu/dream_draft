@@ -15,13 +15,13 @@ const GameState = {
     numRounds: 5,
     currentRound: 1,
     currentSubRound: 1,
-    playersToDraftThisRound: [], 
+    playersToDraftThisRound: [],
     currentPlayerTurnIndex: 0,
-    
+
     csvData: [],
     availablePlayers: [],
-    
-    currentSelections: {}, 
+
+    currentSelections: {},
     rosters: [[], [], [], []],
     confirmedPlayers: {},
     lotteryResults: {},
@@ -53,10 +53,10 @@ function undoState() {
         const prevState = JSON.parse(GameStateHistory.pop());
         Object.keys(GameState).forEach(k => delete GameState[k]);
         Object.assign(GameState, prevState);
-        
+
         const modal = document.getElementById('roster-modal');
         if (modal) modal.style.display = 'none';
-        
+
         render();
     }
 }
@@ -64,13 +64,13 @@ function undoState() {
 function updateGlobalUI() {
     const undoBtn = document.getElementById('undo-btn');
     const rosterBtn = document.getElementById('view-roster-btn');
-    
+
     if (GameState.phase === 'connection' || GameState.phase === 'setup' || GameState.phase === 'final_result') {
-        if(undoBtn) undoBtn.style.display = 'none';
-        if(rosterBtn) rosterBtn.style.display = 'none';
+        if (undoBtn) undoBtn.style.display = 'none';
+        if (rosterBtn) rosterBtn.style.display = 'none';
     } else {
-        if(undoBtn) undoBtn.style.display = (GameStateHistory.length > 0 && (!isOnline || isHost)) ? 'inline-flex' : 'none';
-        if(rosterBtn) rosterBtn.style.display = 'inline-flex';
+        if (undoBtn) undoBtn.style.display = (GameStateHistory.length > 0 && (!isOnline || isHost)) ? 'inline-flex' : 'none';
+        if (rosterBtn) rosterBtn.style.display = 'inline-flex';
     }
 }
 
@@ -82,32 +82,32 @@ function generateRosterHTML() {
         let pitcherCount = 0, infielderCount = 0, outfielderCount = 0, catcherCount = 0;
         let totalSalary = 0, totalAge = 0;
         const teamsSet = new Set();
-        
+
         playerArray.forEach(p => {
             if (!p) return;
             const pos = p.position || '';
             if (pos.includes('投')) pitcherCount++;
             else if (pos.includes('捕')) catcherCount++;
             else if (pos.includes('外')) outfielderCount++;
-            else if (pos.includes('内') || pos.includes('野')) infielderCount++; 
-            
+            else if (pos.includes('内') || pos.includes('野')) infielderCount++;
+
             totalSalary += p.salary || 0;
             totalAge += p.age || 0;
             teamsSet.add(p.team);
         });
-        
+
         const count = playerArray.length;
         const avgAge = count > 0 ? (totalAge / count).toFixed(1) : '0.0';
         const fielderCount = infielderCount + outfielderCount + catcherCount;
         const formatMoney = (val) => new Intl.NumberFormat('ja-JP').format(val);
-        
+
         const isOB = (teamName) => teamName.toUpperCase().includes('OB');
         const draftedNPBTeams = new Set(Array.from(teamsSet).filter(t => !isOB(t)));
         const draftedTeamsArr = Array.from(draftedNPBTeams).sort();
-        
+
         const validNPBTeams = [...(GlobalTags.ceLeagueTeams || []), ...(GlobalTags.paLeagueTeams || [])];
         const undraftedTeamsArr = validNPBTeams.filter(t => !draftedNPBTeams.has(t)).sort();
-        
+
         html += `
         <div class="stat-card glass-panel" style="min-width: 280px; padding: 1rem; flex: 1; border:1px solid var(--accent-color); background: rgba(59, 130, 246, 0.05);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
@@ -131,16 +131,16 @@ function generateRosterHTML() {
             </div>
         </div>`;
     }
-    
+
     html += `</div>`;
-    
+
     html += `<table class="roster-table"><thead><tr>`;
     html += `<th>ラウンド</th>`;
     for (let i = 0; i < GameState.numPlayers; i++) {
         html += `<th>${GameState.playerNames[i]}</th>`;
     }
     html += `</tr></thead><tbody>`;
-    
+
     const maxRows = GameState.numRounds;
     for (let row = 0; row < maxRows; row++) {
         html += `<tr><td style="font-weight:bold;">${row + 1}巡目</td>`;
@@ -181,7 +181,7 @@ function handleCSVUpload(file) {
     const statusEl = document.getElementById('csv-status');
     const startBtn = document.getElementById('start-btn');
     const fileNameDisplay = document.getElementById('file-name-display');
-    
+
     fileNameDisplay.textContent = file.name;
     statusEl.textContent = '読み込み中...';
     statusEl.className = 'status-message';
@@ -189,14 +189,14 @@ function handleCSVUpload(file) {
     Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: function(results) {
+        complete: function (results) {
             if (results.errors.length > 0) {
                 statusEl.textContent = 'CSVの読み込みにエラーが発生しました。';
                 statusEl.className = 'status-message status-error';
                 console.error(results.errors);
                 return;
             }
-            
+
             const data = results.data;
             if (data.length === 0) {
                 statusEl.textContent = 'データが空です。';
@@ -247,7 +247,7 @@ function renderConnectionScreen() {
     appContainer.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'glass-panel setup-screen';
-    
+
     container.innerHTML = `
         <h2 style="text-align:center; margin-bottom: 2rem; font-family: var(--font-display); font-size: 2rem; color: var(--accent-color);">グローバル通信対戦</h2>
         
@@ -274,14 +274,14 @@ function renderConnectionScreen() {
             <button id="offline-btn" class="btn btn-warning-outline" style="width: 100%;">オフラインで開始する</button>
         </div>
     `;
-    
+
     appContainer.appendChild(container);
 
     const statusEl = document.getElementById('connection-status');
 
     document.getElementById('create-room-btn').addEventListener('click', async () => {
         const gasUrl = document.getElementById('gas-url-input').value.trim();
-        if(!gasUrl) { alert("サーバーURLを入力してください"); return; }
+        if (!gasUrl) { alert("サーバーURLを入力してください"); return; }
         SERVER_URL = gasUrl;
         localStorage.setItem('NPBDraftApp_GAS_URL', SERVER_URL);
 
@@ -299,12 +299,12 @@ function renderConnectionScreen() {
                 body: JSON.stringify({ state: initState })
             });
             const data = await res.json();
-            
+
             isOnline = true;
             isHost = true;
             roomId = data.room_id;
             clientId = data.client_id;
-            
+
             myIdx = 0;
             console.log(`Room created: ${roomId}. You are Host (Index 0).`);
             GameState.phase = 'setup';
@@ -319,7 +319,7 @@ function renderConnectionScreen() {
 
     document.getElementById('join-room-btn').addEventListener('click', async () => {
         const gasUrl = document.getElementById('gas-url-input').value.trim();
-        if(!gasUrl) { alert("サーバーURLを入力してください"); return; }
+        if (!gasUrl) { alert("サーバーURLを入力してください"); return; }
         SERVER_URL = gasUrl;
         localStorage.setItem('NPBDraftApp_GAS_URL', SERVER_URL);
 
@@ -381,7 +381,7 @@ function startHostPolling() {
             }
 
             if (data.actions) {
-                for(let action of data.actions) {
+                for (let action of data.actions) {
                     if (action.type === 'join' && GameState.phase === 'setup') {
                         if (GameState.numPlayers < 4 && !GameState.playerNames.includes(action.name)) {
                             GameState.playerNames[GameState.numPlayers] = action.name;
@@ -396,8 +396,8 @@ function startHostPolling() {
                     if (action.type === 'select_player' && GameState.phase === 'draft_input') {
                         const guestName = (action.name || '').trim().toLowerCase();
                         const idx = GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === guestName);
-                        const isCorrectContext = (!action.round || action.round === GameState.currentRound) && 
-                                                 (!action.subRound || action.subRound === GameState.currentSubRound);
+                        const isCorrectContext = (!action.round || action.round === GameState.currentRound) &&
+                            (!action.subRound || action.subRound === GameState.currentSubRound);
                         if (idx !== -1 && GameState.playersToDraftThisRound.includes(idx) && !GameState.currentSelections[idx] && isCorrectContext) {
                             const p = findPlayerById(action.playerId) || (action.isSkip ? { id: action.playerId, name: '（選択パス）', team: '-', position: '-', isSkip: true } : null);
                             if (p) {
@@ -460,8 +460,8 @@ function getDuplicateGroups() {
     const groups = {};
     Object.keys(GameState.currentSelections).forEach(idx => {
         const p = GameState.currentSelections[idx];
-        if(!p || p.isSkip) return;
-        if(!groups[p.id]) groups[p.id] = { p, observers: [] };
+        if (!p || p.isSkip) return;
+        if (!groups[p.id]) groups[p.id] = { p, observers: [] };
         groups[p.id].observers.push(parseInt(idx));
     });
     return Object.values(groups).filter(g => g.observers.length > 1);
@@ -472,7 +472,7 @@ async function broadcastState() {
     try {
         const lightState = {};
         for (const key of Object.keys(GameState)) {
-            if (key === 'lastSeen' || key === 'csvData') continue; 
+            if (key === 'lastSeen' || key === 'csvData') continue;
             if (key === 'availablePlayers') {
                 lightState.availablePlayerIds = GameState.availablePlayers.map(p => p.id);
                 continue;
@@ -496,7 +496,7 @@ async function broadcastState() {
             body: JSON.stringify({ room_id: roomId, client_id: clientId, state: lightState })
         });
         lastVersion++;
-    } catch(e) { console.error('broadcastState error', e); }
+    } catch (e) { console.error('broadcastState error', e); }
 }
 
 async function sendClientAction(actionObj) {
@@ -506,7 +506,7 @@ async function sendClientAction(actionObj) {
             method: 'POST',
             body: JSON.stringify({ room_id: roomId, action: actionObj })
         });
-    } catch(e) {}
+    } catch (e) { }
 }
 
 function findPlayerById(id) {
@@ -526,7 +526,7 @@ function startClientPolling() {
                     lastVersion = data.version;
                     const s = data.state;
                     if (!GameState.csvData.length) loadEmbeddedData();
-                    
+
                     if (s.availablePlayerIds) {
                         const set = new Set(s.availablePlayerIds);
                         GameState.availablePlayers = GameState.csvData.filter(p => set.has(p.id));
@@ -543,11 +543,11 @@ function startClientPolling() {
                     if (s.currentSelectionIds) {
                         const guestIdx = myIdx === -1 ? GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === myPlayerName.trim().toLowerCase()) : myIdx;
                         const localMine = (guestIdx !== -1) ? GameState.currentSelections[guestIdx] : null;
-                        
+
                         // Only protect if round/subRound hasn't changed
-                        const isSamePhase = (s.currentRound === GameState.currentRound && 
-                                             s.currentSubRound === GameState.currentSubRound &&
-                                             s.phase === GameState.phase);
+                        const isSamePhase = (s.currentRound === GameState.currentRound &&
+                            s.currentSubRound === GameState.currentSubRound &&
+                            s.phase === GameState.phase);
 
                         GameState.currentSelections = {};
                         for (const k of Object.keys(s.currentSelectionIds)) {
@@ -566,7 +566,7 @@ function startClientPolling() {
                 }
             }
             if (isOnline && !isHost) sendClientAction({ type: 'ping', name: myPlayerName });
-        } catch(e) {}
+        } catch (e) { }
     }, 3000);
 }
 
@@ -636,7 +636,7 @@ function renderSetupScreen() {
         document.getElementById('back-home-btn').onclick = () => { GameState.phase = 'connection'; render(); };
         return;
     }
-    
+
     container.innerHTML = `
         <h2 style="text-align:center; margin-bottom: 2rem;">${isOnline ? 'ROOM: ' + roomId : 'SETUP'}</h2>
         <div class="form-group">
@@ -668,7 +668,7 @@ function renderSetupScreen() {
         const cont = document.getElementById('player-inputs');
         const updateInputs = (v) => {
             cont.innerHTML = '';
-            for(let i=0; i<v; i++) {
+            for (let i = 0; i < v; i++) {
                 const inp = document.createElement('input');
                 inp.className = 'form-control'; inp.value = GameState.playerNames[i];
                 inp.oninput = (e) => GameState.playerNames[i] = e.target.value;
@@ -683,9 +683,9 @@ function renderSetupScreen() {
     document.getElementById('back-home-btn').onclick = () => { GameState.phase = 'connection'; render(); };
     document.getElementById('start-btn').onclick = async () => {
         saveState();
-        GameState.rosters = Array(GameState.numPlayers).fill(0).map(()=>[]);
+        GameState.rosters = Array(GameState.numPlayers).fill(0).map(() => []);
         GameState.currentRound = 1; GameState.currentSubRound = 1;
-        GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
+        GameState.playersToDraftThisRound = Array.from({ length: GameState.numPlayers }, (_, i) => i);
         GameState.phase = 'draft_input';
         if (isOnline && isHost) await broadcastState();
         render();
@@ -698,27 +698,27 @@ function renderDraftInputIntermission() {
 }
 
 const getTeamColor = (tName) => {
-    if(tName.includes('阪神')) return {bg: '#F5C700', fg: '#000000'}; 
-    if(tName.includes('DeNA') || tName.includes('ベイスターズ')) return {bg: '#0055A5', fg: '#ffffff'}; 
-    if(tName.includes('巨人') || tName.includes('ジャイアンツ') || tName.includes('読売')) return {bg: '#F97709', fg: '#ffffff'}; 
-    if(tName.includes('中日') || tName.includes('ドラゴンズ')) return {bg: '#003595', fg: '#ffffff'}; 
-    if(tName.includes('広島') || tName.includes('カープ')) return {bg: '#FF0000', fg: '#ffffff'}; 
-    if(tName.includes('ヤクルト') || tName.includes('スワローズ')) return {bg: '#98C145', fg: '#000000'}; 
-    if(tName.includes('ソフトバンク') || tName.includes('ホークス')) return {bg: '#F9C700', fg: '#000000'}; 
-    if(tName.includes('日本ハム') || tName.includes('ファイターズ')) return {bg: '#4C7B9E', fg: '#ffffff'}; 
-    if(tName.includes('オリックス') || tName.includes('バファローズ')) return {bg: '#10284D', fg: '#ffffff'}; 
-    if(tName.includes('楽天') || tName.includes('イーグルス')) return {bg: '#860010', fg: '#ffffff'}; 
-    if(tName.includes('西武') || tName.includes('ライオンズ')) return {bg: '#1A3C6B', fg: '#ffffff'}; 
-    if(tName.includes('ロッテ') || tName.includes('マリーンズ')) return {bg: '#222222', fg: '#ffffff'}; 
-    return {bg: '#6B7280', fg: '#ffffff'}; 
+    if (tName.includes('阪神')) return { bg: '#F5C700', fg: '#000000' };
+    if (tName.includes('DeNA') || tName.includes('ベイスターズ')) return { bg: '#0055A5', fg: '#ffffff' };
+    if (tName.includes('巨人') || tName.includes('ジャイアンツ') || tName.includes('読売')) return { bg: '#F97709', fg: '#ffffff' };
+    if (tName.includes('中日') || tName.includes('ドラゴンズ')) return { bg: '#003595', fg: '#ffffff' };
+    if (tName.includes('広島') || tName.includes('カープ')) return { bg: '#FF0000', fg: '#ffffff' };
+    if (tName.includes('ヤクルト') || tName.includes('スワローズ')) return { bg: '#98C145', fg: '#000000' };
+    if (tName.includes('ソフトバンク') || tName.includes('ホークス')) return { bg: '#F9C700', fg: '#000000' };
+    if (tName.includes('日本ハム') || tName.includes('ファイターズ')) return { bg: '#4C7B9E', fg: '#ffffff' };
+    if (tName.includes('オリックス') || tName.includes('バファローズ')) return { bg: '#10284D', fg: '#ffffff' };
+    if (tName.includes('楽天') || tName.includes('イーグルス')) return { bg: '#860010', fg: '#ffffff' };
+    if (tName.includes('西武') || tName.includes('ライオンズ')) return { bg: '#1A3C6B', fg: '#ffffff' };
+    if (tName.includes('ロッテ') || tName.includes('マリーンズ')) return { bg: '#222222', fg: '#ffffff' };
+    return { bg: '#6B7280', fg: '#ffffff' };
 };
 
 const getPosColor = (pName) => {
-    if(pName.includes('投')) return {bg: '#ef4444', fg: '#ffffff'}; 
-    if(pName.includes('捕')) return {bg: '#3b82f6', fg: '#ffffff'}; 
-    if(pName.includes('内')) return {bg: '#eab308', fg: '#000000'}; 
-    if(pName.includes('外')) return {bg: '#10b981', fg: '#ffffff'}; 
-    return {bg: '#6B7280', fg: '#ffffff'};
+    if (pName.includes('投')) return { bg: '#ef4444', fg: '#ffffff' };
+    if (pName.includes('捕')) return { bg: '#3b82f6', fg: '#ffffff' };
+    if (pName.includes('内')) return { bg: '#eab308', fg: '#000000' };
+    if (pName.includes('外')) return { bg: '#10b981', fg: '#ffffff' };
+    return { bg: '#6B7280', fg: '#ffffff' };
 };
 
 function renderDraftInputScreen() {
@@ -726,15 +726,15 @@ function renderDraftInputScreen() {
     const lastSearch = document.getElementById('p-search') ? document.getElementById('p-search').value : (window._lastSearch || '');
 
     appContainer.innerHTML = '';
-    const myIdx = GameState.playerNames.indexOf(myPlayerName);
-    const hasSelected = GameState.currentSelections[myIdx] != null;
-    const inRound = GameState.playersToDraftThisRound.includes(myIdx);
+    let myIdx = isOnline ? GameState.playerNames.indexOf(myPlayerName) : GameState.currentTurn;
+    const hasSelected = isOnline ? (GameState.currentSelections[myIdx] != null) : false;
+    const inRound = isOnline ? GameState.playersToDraftThisRound.includes(myIdx) : true;
     const container = document.createElement('div');
     container.className = 'glass-panel';
 
-    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound-1) + ')' : ''}`;
+    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound - 1) + ')' : ''}`;
 
-    if (!inRound || hasSelected) {
+    if (isOnline && (!inRound || hasSelected)) {
         const unpicked = GameState.playersToDraftThisRound.filter(idx => !GameState.currentSelections[idx]);
         const total = GameState.playersToDraftThisRound.length;
         container.innerHTML = `
@@ -744,7 +744,7 @@ function renderDraftInputScreen() {
                 <div style="margin:2rem 0;">
                     <p>指名完了: ${total - unpicked.length} / ${total}</p>
                     <div style="height:8px; background:rgba(255,255,255,0.1); border-radius:4px; overflow:hidden;">
-                        <div style="height:100%; width:${( (total-unpicked.length)/total ) * 100}%; background:var(--accent-color);"></div>
+                        <div style="height:100%; width:${((total - unpicked.length) / total) * 100}%; background:var(--accent-color);"></div>
                     </div>
                 </div>
                 <div style="text-align:left;">
@@ -760,7 +760,7 @@ function renderDraftInputScreen() {
         `;
         appContainer.appendChild(container);
         window.manualSkip = async (idx) => {
-            if(!confirm('パスさせますか？')) return;
+            if (!confirm('パスさせますか？')) return;
             GameState.currentSelections[idx] = { id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true };
             if (Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) GameState.phase = 'draft_reveal';
             await broadcastState(); render();
@@ -772,7 +772,7 @@ function renderDraftInputScreen() {
     let selected = null;
     container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>${myPlayerName} の指名</h2>
+            <h2>${isOnline ? myPlayerName : GameState.playerNames[GameState.currentTurn]} の指名</h2>
             <span class="badge badge-accent">${roundText}</span>
         </div>
         
@@ -781,24 +781,24 @@ function renderDraftInputScreen() {
                 <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">セ:</div>
                 <div class="team-pills-container">
                     ${(GlobalTags.ceLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+        const style = getTeamColor(t);
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
                             <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                 <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">パ:</div>
                 <div class="team-pills-container">
                     ${(GlobalTags.paLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+        const style = getTeamColor(t);
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
                             <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             ${(GlobalTags.otherTeams || []).length > 0 ? `
@@ -806,12 +806,12 @@ function renderDraftInputScreen() {
                 <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">他:</div>
                 <div class="team-pills-container">
                     ${GlobalTags.otherTeams.map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+        const style = getTeamColor(t);
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
                             <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             ` : ''}
@@ -819,23 +819,23 @@ function renderDraftInputScreen() {
                 <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">位置:</div>
                 <div class="team-pills-container">
                     ${GlobalTags.positions.map(p => {
-                        const style = getPosColor(p);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+        const style = getPosColor(p);
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
                             <input type="checkbox" value="${p}" class="pos-filter-checkbox" style="display:none;">
                             <span class="team-pill">${p}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                 <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">年俸:</div>
                 <div class="team-pills-container">
                     ${[
-                        {label:'~5000万', range:'0-5000'},
-                        {label:'5000万~1億', range:'5001-10000'},
-                        {label:'1億~3億', range:'10001-30000'},
-                        {label:'3億~', range:'30001-999999'}
-                    ].map(opt => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
+            { label: '~5000万', range: '0-5000' },
+            { label: '5000万~1億', range: '5001-10000' },
+            { label: '1億~3億', range: '10001-30000' },
+            { label: '3億~', range: '30001-999999' }
+        ].map(opt => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
                         <input type="checkbox" value="${opt.range}" class="salary-filter-checkbox" style="display:none;">
                         <span class="team-pill">${opt.label}</span>
                     </label>`).join('')}
@@ -861,10 +861,10 @@ function renderDraftInputScreen() {
     appContainer.appendChild(container);
 
     const list = document.getElementById('p-list'), info = document.getElementById('sel-info'), btn = document.getElementById('conf-btn');
-    const draw = (f='') => {
+    const draw = (f = '') => {
         list.innerHTML = '';
         const lowerFilter = f.toLowerCase();
-        
+
         const fTeams = Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(cb => cb.value);
         const fPosArr = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(cb => cb.value);
         const fSalaries = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked')).map(cb => cb.value);
@@ -872,7 +872,7 @@ function renderDraftInputScreen() {
         GameState.availablePlayers.filter(p => {
             if (fTeams.length > 0 && !fTeams.includes(p.team)) return false;
             if (fPosArr.length > 0 && !fPosArr.some(filterPos => p.position.includes(filterPos))) return false;
-            
+
             if (fSalaries.length > 0) {
                 const match = fSalaries.some(rangeStr => {
                     const [min, max] = rangeStr.split('-').map(Number);
@@ -880,16 +880,16 @@ function renderDraftInputScreen() {
                 });
                 if (!match) return false;
             }
-            
+
             if (lowerFilter) {
-                return p.name.toLowerCase().includes(lowerFilter) || 
-                       p.team.toLowerCase().includes(lowerFilter) ||
-                       p.position.toLowerCase().includes(lowerFilter);
+                return p.name.toLowerCase().includes(lowerFilter) ||
+                    p.team.toLowerCase().includes(lowerFilter) ||
+                    p.position.toLowerCase().includes(lowerFilter);
             }
             return true;
-        }).slice(0,50).forEach(p => {
+        }).slice(0, 50).forEach(p => {
             const tr = document.createElement('tr'); tr.className = 'player-row';
-            if(selected && selected.id === p.id) tr.classList.add('selected');
+            if (selected && selected.id === p.id) tr.classList.add('selected');
             tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td><td style="font-size:0.8rem;">${p.salary}万</td>`;
             tr.onclick = () => {
                 selected = p; draw(f);
@@ -899,12 +899,12 @@ function renderDraftInputScreen() {
             list.appendChild(tr);
         });
     };
-    const pSearch = document.getElementById('p-search');
     pSearch.oninput = (e) => draw(e.target.value);
-    if (lastSearch) {
-        pSearch.value = lastSearch;
-        draw(lastSearch);
-    }
+    
+    // Restore search value and initial draw
+    pSearch.value = lastSearch;
+    draw(lastSearch);
+    
     pSearch.addEventListener('blur', (e) => { window._lastSearch = e.target.value; });
 
     if (wasFocused) {
@@ -916,24 +916,33 @@ function renderDraftInputScreen() {
         cb.onchange = () => draw(pSearch.value);
     });
     const finalize = async (p) => {
-        if(isOnline) await sendClientAction({ 
-            type: 'select_player', 
-            name: myPlayerName, 
-            playerId: p.id, 
-            isSkip: !!p.isSkip,
-            round: GameState.currentRound,
-            subRound: GameState.currentSubRound
-        });
-        GameState.currentSelections[myIdx] = p;
-        // Host locally check transition
-        if(isHost && Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) {
-            GameState.phase = 'draft_reveal';
+        if (isOnline) {
+            await sendClientAction({
+                type: 'select_player',
+                name: myPlayerName,
+                playerId: p.id,
+                isSkip: !!p.isSkip,
+                round: GameState.currentRound,
+                subRound: GameState.currentSubRound
+            });
+            GameState.currentSelections[myIdx] = p;
+            if (isHost && Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) {
+                GameState.phase = 'draft_reveal';
+            }
+            if (isOnline && isHost) await broadcastState();
+        } else {
+            // Offline turn-based logic
+            GameState.currentSelections[GameState.currentTurn] = p;
+            if (GameState.currentTurn < GameState.numPlayers - 1) {
+                GameState.currentTurn++;
+            } else {
+                GameState.phase = 'draft_reveal';
+            }
         }
-        if(isOnline && isHost) await broadcastState();
         render();
     };
     btn.onclick = () => finalize(selected);
-    document.getElementById('skip-btn').onclick = () => { if(confirm('パスしますか？')) finalize({id:'skip-'+Date.now(), name:'（選択パス）', team:'-', position:'-', isSkip:true}); };
+    document.getElementById('skip-btn').onclick = () => { if (confirm('パスしますか？')) finalize({ id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true }); };
 }
 
 function renderDraftRevealScreen() {
@@ -942,7 +951,7 @@ function renderDraftRevealScreen() {
     container.className = 'glass-panel';
     container.style.textAlign = 'center';
 
-    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound-1) + ')' : ''}`;
+    let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound - 1) + ')' : ''}`;
 
     // 1. Lottery View (Dedicated)
     if (GameState.activeLottery) {
@@ -989,7 +998,7 @@ function renderDraftRevealScreen() {
     const grid = container.querySelector('.reveal-grid');
     GameState.playersToDraftThisRound.forEach(idx => {
         const p = GameState.currentSelections[idx];
-        if(!p) return;
+        if (!p) return;
         const card = document.createElement('div');
         card.className = 'glass-panel reveal-card-pop'; card.style.padding = '1rem';
         card.innerHTML = `<div style="font-size:0.8rem; color:var(--text-secondary);">${GameState.playerNames[idx]}</div><div style="font-weight:bold;">${p.name}</div><div style="font-size:0.75rem;">${p.team}</div>`;
@@ -999,8 +1008,8 @@ function renderDraftRevealScreen() {
     const groups = {};
     Object.keys(GameState.currentSelections).forEach(idx => {
         const p = GameState.currentSelections[idx];
-        if(!p || p.isSkip) return;
-        if(!groups[p.id]) groups[p.id] = { p, observers: [] };
+        if (!p || p.isSkip) return;
+        if (!groups[p.id]) groups[p.id] = { p, observers: [] };
         groups[p.id].observers.push(parseInt(idx));
     });
 
@@ -1011,43 +1020,43 @@ function renderDraftRevealScreen() {
     const run = async () => {
         singles.forEach(g => {
             const winIdx = g.observers[0];
-            GameState.rosters[winIdx][GameState.currentRound-1] = g.p;
+            GameState.rosters[winIdx][GameState.currentRound - 1] = g.p;
             GameState.availablePlayers = GameState.availablePlayers.filter(x => x.id !== g.p.id);
         });
-        
-        for(const g of dups) {
+
+        for (const g of dups) {
             const res = GameState.lotteryResults[g.p.id];
             const div = document.createElement('div'); div.className = 'glass-panel'; div.style.margin = '1rem 0;';
             div.innerHTML = `<h4>${g.p.name} の抽選</h4><div id="r-${g.p.id}"></div>`;
             lBox.appendChild(div);
             const rDiv = document.getElementById('r-' + g.p.id);
 
-            if(res) {
+            if (res) {
                 const name = GameState.playerNames[res.winnerIndex];
                 rDiv.innerHTML = `<span style="color:var(--success-color)">交渉権獲得: ${name}</span>`;
-                GameState.rosters[res.winnerIndex][GameState.currentRound-1] = g.p;
+                GameState.rosters[res.winnerIndex][GameState.currentRound - 1] = g.p;
                 GameState.availablePlayers = GameState.availablePlayers.filter(x => x.id !== g.p.id);
-            } else if(isHost) {
+            } else if (isHost) {
                 const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '抽選する';
                 rDiv.appendChild(b);
                 b.onclick = async () => {
                     b.style.display = 'none';
                     // Start synced lottery
-                    GameState.activeLottery = { 
-                        playerId: g.p.id, 
-                        participants: g.observers, 
-                        startTime: Date.now(), 
-                        isRunning: true 
+                    GameState.activeLottery = {
+                        playerId: g.p.id,
+                        participants: g.observers,
+                        startTime: Date.now(),
+                        isRunning: true
                     };
                     await broadcastState();
                     render();
 
                     // Wait for animation
                     setTimeout(async () => {
-                        const winIdx = g.observers[Math.floor(Math.random()*g.observers.length)];
+                        const winIdx = g.observers[Math.floor(Math.random() * g.observers.length)];
                         GameState.lotteryResults[g.p.id] = { winnerIndex: winIdx };
                         GameState.activeLottery = null;
-                        await broadcastState(); 
+                        await broadcastState();
                         render();
                     }, 4000);
                 };
@@ -1055,18 +1064,18 @@ function renderDraftRevealScreen() {
                 rDiv.innerHTML = 'ホストの抽選待ち...';
             }
         }
-        
+
         const hasPendingLottery = dups.some(g => !GameState.lotteryResults[g.p.id]);
-        if(!hasPendingLottery) showProceed();
+        if (!hasPendingLottery) showProceed();
     };
 
     const showProceed = () => {
         const box = document.getElementById('proceed-box');
         const ok = GameState.confirmedPlayers[myPlayerName];
-        if(!ok) {
+        if (!ok) {
             const btn = document.createElement('button'); btn.className = 'btn btn-success'; btn.textContent = 'OK (3秒待機)';
             box.appendChild(btn);
-            const fn = async () => { if(GameState.confirmedPlayers[myPlayerName]) return; GameState.confirmedPlayers[myPlayerName]=true; if(isOnline) await sendClientAction({type:'confirm_reveal', name:myPlayerName}); render(); };
+            const fn = async () => { if (GameState.confirmedPlayers[myPlayerName]) return; GameState.confirmedPlayers[myPlayerName] = true; if (isOnline) await sendClientAction({ type: 'confirm_reveal', name: myPlayerName }); render(); };
             btn.onclick = fn; setTimeout(fn, 3000);
         } else {
             const un = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
@@ -1080,18 +1089,19 @@ async function advanceDraft() {
     GameState.lotteryResults = {}; GameState.confirmedPlayers = {};
     const losers = [];
     GameState.playersToDraftThisRound.forEach(idx => {
-        if(!GameState.rosters[idx][GameState.currentRound-1]) losers.push(idx);
+        if (!GameState.rosters[idx][GameState.currentRound - 1]) losers.push(idx);
     });
 
-    if(losers.length) {
+    if (losers.length) {
         GameState.playersToDraftThisRound = losers; GameState.currentSubRound++;
     } else {
         GameState.currentRound++; GameState.currentSubRound = 1;
-        GameState.playersToDraftThisRound = Array.from({length: GameState.numPlayers}, (_, i) => i);
+        GameState.playersToDraftThisRound = Array.from({ length: GameState.numPlayers }, (_, i) => i);
     }
     GameState.currentSelections = {};
+    GameState.currentTurn = 0; // Reset for offline mode
     GameState.phase = (GameState.currentRound > GameState.numRounds) ? 'final_result' : 'draft_input';
-    if(isOnline && isHost) await broadcastState();
+    if (isOnline && isHost) await broadcastState();
 }
 
 function renderFinalResultScreen() {
@@ -1101,17 +1111,17 @@ function renderFinalResultScreen() {
 function render() {
     updateGlobalUI();
     const p = GameState.phase;
-    if(p==='connection') renderConnectionScreen();
-    else if(p==='setup') renderSetupScreen();
-    else if(p==='draft_input') renderDraftInputScreen();
-    else if(p==='draft_reveal') renderDraftRevealScreen();
-    else if(p==='final_result') renderFinalResultScreen();
+    if (p === 'connection') renderConnectionScreen();
+    else if (p === 'setup') renderSetupScreen();
+    else if (p === 'draft_input') renderDraftInputScreen();
+    else if (p === 'draft_reveal') renderDraftRevealScreen();
+    else if (p === 'final_result') renderFinalResultScreen();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('undo-btn').onclick = () => { if(confirm('戻しますか？')) undoState(); };
+    document.getElementById('undo-btn').onclick = () => { if (confirm('戻しますか？')) undoState(); };
     document.getElementById('view-roster-btn').onclick = renderRosterModal;
-    document.getElementById('close-roster-btn').onclick = () => { document.getElementById('roster-modal').style.display='none'; };
-    window.addEventListener('beforeunload', (e) => { if(GameState.phase!=='connection'&&GameState.phase!=='final_result') { e.preventDefault(); e.returnValue='終了しますか？'; }});
+    document.getElementById('close-roster-btn').onclick = () => { document.getElementById('roster-modal').style.display = 'none'; };
+    window.addEventListener('beforeunload', (e) => { if (GameState.phase !== 'connection' && GameState.phase !== 'final_result') { e.preventDefault(); e.returnValue = '終了しますか？'; } });
     render();
 });
