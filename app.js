@@ -899,6 +899,7 @@ function renderDraftInputScreen() {
             list.appendChild(tr);
         });
     };
+    const pSearch = document.getElementById('p-search');
     pSearch.oninput = (e) => draw(e.target.value);
     
     // Restore search value and initial draw
