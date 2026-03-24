@@ -382,12 +382,19 @@ function startHostPolling() {
                         stateChanged = true;
                     }
                     if (action.type === 'select_player' && GameState.phase === 'draft_input') {
-                        const idx = GameState.playerNames.indexOf(action.name);
-                        if (GameState.playersToDraftThisRound.includes(idx) && !GameState.currentSelections[idx]) {
+                        const guestName = (action.name || '').trim().toLowerCase();
+                        const idx = GameState.playerNames.findIndex(n => (n || '').trim().toLowerCase() === guestName);
+                        
+                        // Validate index and round/sub-round context if provided
+                        const isCorrectContext = (!action.round || action.round === GameState.currentRound) && 
+                                                 (!action.subRound || action.subRound === GameState.currentSubRound);
+
+                        if (idx !== -1 && GameState.playersToDraftThisRound.includes(idx) && !GameState.currentSelections[idx] && isCorrectContext) {
                             const p = findPlayerById(action.playerId) || (action.isSkip ? { id: action.playerId, name: '（選択パス）', team: '-', position: '-', isSkip: true } : null);
                             if (p) {
                                 GameState.currentSelections[idx] = p;
                                 stateChanged = true;
+                                console.log(`Host recorded selection for player index ${idx}: ${p.name}`);
                             }
                         }
                     }
@@ -882,9 +889,19 @@ function renderDraftInputScreen() {
         cb.onchange = () => draw(document.getElementById('p-search').value);
     });
     const finalize = async (p) => {
-        if(isOnline) await sendClientAction({ type: 'select_player', name: myPlayerName, playerId: p.id, isSkip: !!p.isSkip });
+        if(isOnline) await sendClientAction({ 
+            type: 'select_player', 
+            name: myPlayerName, 
+            playerId: p.id, 
+            isSkip: !!p.isSkip,
+            round: GameState.currentRound,
+            subRound: GameState.currentSubRound
+        });
         GameState.currentSelections[myIdx] = p;
-        if(isHost && Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) GameState.phase = 'draft_reveal';
+        // Host locally check transition
+        if(isHost && Object.keys(GameState.currentSelections).length >= GameState.playersToDraftThisRound.length) {
+            GameState.phase = 'draft_reveal';
+        }
         if(isOnline && isHost) await broadcastState();
         render();
     };
