@@ -1,5 +1,5 @@
 const GameState = {
-    phase: 'connection',
+    phase: 'top',
     numPlayers: 2,
     playerNames: ['プレイヤー1', 'プレイヤー2', 'プレイヤー3', 'プレイヤー4'],
     numRounds: 5,
@@ -20,7 +20,8 @@ const GameState = {
     losers: [],
     lastSeen: {},
     playerStatus: {}, // {name: boolean} online status
-    godsHandUsed: {}  // {name: boolean}
+    godsHandUsed: {},  // {name: boolean}
+    isMuted: false
 };
 
 let GameStateHistory = [];

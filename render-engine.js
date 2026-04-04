@@ -3,8 +3,15 @@ const appContainer = document.getElementById('main-content');
 function updateGlobalUI() {
     const undoBtn = document.getElementById('undo-btn');
     const rosterBtn = document.getElementById('view-roster-btn');
+    const header = document.querySelector('.app-header');
 
-    if (GameState.phase === 'connection' || GameState.phase === 'setup' || GameState.phase === 'final_result') {
+    if (GameState.phase === 'top') {
+        if (header) header.style.display = 'none';
+    } else {
+        if (header) header.style.display = 'flex';
+    }
+
+    if (GameState.phase === 'top' || GameState.phase === 'connection' || GameState.phase === 'setup' || GameState.phase === 'final_result') {
         if (undoBtn) undoBtn.style.display = 'none';
         if (rosterBtn) rosterBtn.style.display = 'none';
     } else {
@@ -99,7 +106,7 @@ function generateRosterHTML() {
                 html += `<td>
                     <div style="font-weight:bold; color:var(--text-primary); font-size: 1.1rem;">${draftedPlayer.name}</div>
                     <div style="font-size:0.75rem; color: var(--text-secondary);">${draftedPlayer.team} - ${draftedPlayer.position}</div>
-                    <div style="font-size:0.75rem; color: var(--accent-color);">${ageText}${salText}</div>
+                    <div style="font-size:0.75rem; color: var(--accent-color);">${ageText}${formatSalary(draftedPlayer.salary)}</div>
                 </td>`;
             } else {
                 html += `<td class="empty-slot">-</td>`;
@@ -138,50 +145,97 @@ const getTeamColor = (tName) => {
 const getPosColor = (pName) => {
     if (pName.includes('投')) return { bg: '#ef4444', fg: '#ffffff' };
     if (pName.includes('捕')) return { bg: '#3b82f6', fg: '#ffffff' };
-    if (pName.includes('内')) return { bg: '#eab308', fg: '#000000' };
+    if (pName.includes('内')) return { bg: '#eab308', fg: '#ffffff' };
     if (pName.includes('外')) return { bg: '#10b981', fg: '#ffffff' };
     return { bg: '#6B7280', fg: '#ffffff' };
 };
 
+const formatSalary = (val) => {
+    if (!val || val === 0) return '-';
+    const formatter = new Intl.NumberFormat('ja-JP');
+    if (val >= 10000) {
+        const oku = Math.floor(val / 10000);
+        const man = val % 10000;
+        if (man === 0) return `${oku}億円`;
+        return `${oku}億${formatter.format(man)}万`;
+    }
+    return formatter.format(val) + '万';
+};
+
+function renderTopScreen() {
+    const main = document.getElementById('main-content');
+    if (main) main.style.paddingTop = '0px';
+
+    appContainer.innerHTML = `
+        <div class="top-screen">
+            <h1 class="top-title">ドリーム<br>ドラフト</h1>
+            <div id="start-trigger" class="tap-to-start" style="margin-bottom: 3rem;">Tap to Start</div>
+            <div id="mute-toggle" style="cursor:pointer; font-size:1.2rem; padding:0.5rem 1rem; border-radius:2rem; background:rgba(255,255,255,0.5); border:1px solid var(--border-color); display:flex; align-items:center; gap:0.5rem; transition:var(--transition); box-shadow:var(--pop-shadow);">
+                <span id="mute-icon">${GameState.isMuted ? '🔇' : '🔊'}</span>
+                <span id="mute-text">${GameState.isMuted ? '消音中' : 'サウンドON'}</span>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('mute-toggle').onclick = (e) => {
+        e.stopPropagation();
+        GameState.isMuted = !GameState.isMuted;
+        const icon = document.getElementById('mute-icon');
+        const text = document.getElementById('mute-text');
+        icon.textContent = GameState.isMuted ? '🔇' : '🔊';
+        text.textContent = GameState.isMuted ? '消音中' : 'サウンドON';
+        if (!GameState.isMuted) Sound.tap();
+    };
+
+    document.getElementById('start-trigger').onclick = () => {
+        Sound.start();
+        if (main) main.style.paddingTop = '';
+        GameState.phase = 'connection';
+        render();
+    };
+}
+
 function renderConnectionScreen() {
     appContainer.innerHTML = `
-        <div class="glass-panel" style="text-align:center; padding: 2rem;">
-            <h2 style="margin-bottom:2rem; font-family:var(--font-display); font-size:2.5rem; letter-spacing:2px;">SELECT MODE</h2>
+        <div class="glass-panel" style="text-align:center; padding: 2rem; border:none; background:transparent; box-shadow:none;">
+            <h2 style="margin-bottom:2rem; font-family:var(--font-sans); font-size:2.5rem; letter-spacing:2px; font-weight:900; color:var(--accent-color);">モード選択</h2>
             <div id="connection-status" class="status-message"></div>
             
-            <div style="display:grid; grid-template-columns:1fr; gap:1.5rem; margin:2rem 0;">
-                <div class="glass-panel" style="padding:1.5rem; border-color:var(--accent-color);">
-                    <h3>🛜 オンライン対戦</h3>
-                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1rem;">サーバー経由で友達と対戦します</p>
-                    <input type="text" id="gas-url-input" class="form-control" placeholder="サーバーURL" style="margin-bottom:1rem;">
+            <div style="display:grid; grid-template-columns:1fr; gap:2rem; margin:2rem 0;">
+                <div class="glass-panel fade-slide-up" style="padding:1.5rem; border-color:var(--accent-color); text-align:left;">
+                    <h3 style="font-size:1.5rem; color:var(--accent-color); margin-bottom:0.5rem;">🛜 オンライン対戦</h3>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.5rem;">サーバー（GAS等）を経由して、離れた友達とリアルタイムで対戦します。</p>
+                    <input type="text" id="gas-url-input" class="form-control" placeholder="コマンドセンター(GAS)のURL" style="margin-bottom:1rem;">
                     
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
-                        <div style="border:1px solid var(--border-color); padding:1rem; border-radius:0.5rem;">
-                            <h4>ホストとして作成</h4>
-                            <input type="text" id="host-name" class="form-control" placeholder="あなたの名前" style="margin-bottom:0.5rem;">
-                            <button id="create-room-btn" class="btn btn-primary" style="width:100%;">ルーム作成</button>
+                        <div style="border:1px solid var(--border-color); padding:1rem; border-radius:1rem; background:rgba(255,255,255,0.4);">
+                            <h4 style="font-size:0.9rem; margin-bottom:0.5rem;">ホスト作成</h4>
+                            <input type="text" id="host-name" class="form-control" placeholder="名前" style="margin-bottom:0.5rem; height:40px; font-size:0.85rem;">
+                            <button id="create-room-btn" class="btn btn-primary" style="width:100%; height:40px; font-size:0.85rem;">ルーム作成</button>
                         </div>
-                        <div style="border:1px solid var(--border-color); padding:1rem; border-radius:0.5rem;">
-                            <h4>ゲストとして参加</h4>
-                            <input type="text" id="join-room-id" class="form-control" placeholder="ルームID" style="margin-bottom:0.5rem;">
-                            <input type="text" id="join-room-name" class="form-control" placeholder="あなたの名前" style="margin-bottom:0.5rem;">
-                            <button id="join-room-btn" class="btn btn-secondary" style="width:100%;">参加する</button>
+                        <div style="border:1px solid var(--border-color); padding:1rem; border-radius:1rem; background:rgba(255,255,255,0.4);">
+                            <h4 style="font-size:0.9rem; margin-bottom:0.5rem;">ゲスト参加</h4>
+                            <input type="tel" id="join-room-id" class="form-control" placeholder="ルームID (数字)" style="margin-bottom:0.5rem; height:40px; font-size:0.85rem;" inputmode="numeric" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                            <input type="text" id="join-room-name" class="form-control" placeholder="名前" style="margin-bottom:0.5rem; height:40px; font-size:0.85rem;">
+                            <button id="join-room-btn" class="btn btn-secondary" style="width:100%; height:40px; font-size:0.85rem;">参加する</button>
                         </div>
                     </div>
                 </div>
 
-                <div class="glass-panel" style="padding:1.5rem; border-color:var(--success-color);">
-                    <h3>🏠 オフライン対戦</h3>
-                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1rem;">この端末1台で順番に操作します</p>
-                    <button id="offline-btn" class="btn btn-success" style="width:100%; padding:1rem; font-size:1.2rem;">開始する</button>
+                <div class="glass-panel fade-slide-up" style="padding:1.5rem; border-color:var(--success-color); text-align:left; animation-delay: 0.2s;">
+                    <h3 style="font-size:1.5rem; color:var(--success-color); margin-bottom:0.5rem;">🏠 オフライン対戦</h3>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.5rem;">この端末1台を回して交代で操作します。対面での対戦に最適です。</p>
+                    <button id="offline-btn" class="btn btn-primary" style="width:100%; padding:1.2rem; font-size:1.4rem; background:var(--success-color); box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.3);">オフラインで開始</button>
                 </div>
             </div>
             
-            <div class="form-group" style="margin-top:2rem;">
-                <label class="form-label">選手データCSVの読み込み</label>
-                <p id="file-name-display" style="font-size:0.8rem; color:var(--accent-color); font-weight:bold; margin-bottom:0.5rem;">未選択 (内蔵データを使用)</p>
-                <input type="file" id="csv-upload" accept=".csv" style="display:none;">
-                <button onclick="document.getElementById('csv-upload').click()" class="btn btn-secondary">CSVファイルを選択</button>
+            <div class="form-group fade-slide-up" style="margin-top:2rem; animation-delay: 0.4s;">
+                <label class="form-label">カスタム選手データ (任意)</label>
+                <div style="background:rgba(255,255,255,0.5); padding:1rem; border-radius:1rem; border:1px solid var(--border-color);">
+                    <p id="file-name-display" style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.8rem;">未選択 (デフォルトの選手データを使用)</p>
+                    <input type="file" id="csv-upload" accept=".csv" style="display:none;">
+                    <button onclick="document.getElementById('csv-upload').click()" class="btn btn-secondary" style="width:100%;">CSVファイルを読み込む</button>
+                </div>
                 <div id="csv-status" class="status-message"></div>
             </div>
         </div>
@@ -200,12 +254,27 @@ function renderSetupScreen() {
             <div style="text-align:center; padding: 3rem 1rem;">
                 <h2 style="font-size:2.5rem; color:var(--accent-color);">ROOM: ${roomId}</h2>
                 <h3>待機中...</h3>
-                <div style="padding: 1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem; text-align:left; margin: 2rem 0;">
-                    <h4>参加者</h4>
-                    <ul style="color:var(--text-secondary);">
-                        ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<li>${getStatusDot(n)} ${n}</li>`).join('')}
-                    </ul>
+                <h4 style="font-size:0.9rem; margin-bottom:0.8rem; text-align:left; color:var(--text-secondary);">参加者</h4>
+                <div style="padding: 1rem; background:white; border-radius:1rem; border:1px solid var(--border-color); text-align:left; margin-bottom: 1.5rem; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                        ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `
+                            <div style="display:flex; align-items:center; border-bottom:1px solid #f1f5f9; padding: 0.25rem 0;">
+                                ${getStatusDot(n)} <span style="margin-left:0.5rem; color:var(--text-primary); font-size: 0.95rem;">${n}</span>
+                            </div>`).join('')}
+                    </div>
                 </div>
+                <!-- 凡例と説明 -->
+                <div style="font-size:0.8rem; text-align:left; color:var(--text-secondary); margin-bottom:1.5rem; padding:0.5rem; border-left:3px solid var(--accent-color); background:rgba(14,165,233,0.05);">
+                    <div style="display:flex; gap:1rem; margin-bottom:0.6rem;">
+                        <span style="display:flex; align-items:center; gap:0.2rem;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--success-color); box-shadow:0 0 5px var(--success-color);"></span> 接続中</span>
+                        <span style="display:flex; align-items:center; gap:0.2rem;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--text-secondary);"></span> 未接続</span>
+                    </div>
+                    <p style="margin:0; border-bottom:1px solid rgba(0,0,0,0.05); padding-bottom:0.3rem; margin-bottom:0.3rem;">
+                        参加者全員のマークが <span style="display:inline-block; vertical-align:middle; width:8px; height:8px; border-radius:50%; background:var(--success-color); box-shadow:0 0 5px var(--success-color);"></span> 緑色（接続中）になるまでお待ちください。
+                    </p>
+                    <p style="margin:0; font-weight:bold; color:var(--accent-color);">2人以上集まったら開始できます。</p>
+                </div>
+
                 <button id="back-home-btn" class="btn btn-warning-outline" style="width: 100%;">戻る</button>
             </div>
         `;
@@ -219,8 +288,24 @@ function renderSetupScreen() {
         <div class="form-group">
             <label class="form-label">${isOnline ? '参加者' : '人数'}</label>
             ${isOnline ? `
-                 <div style="padding:1rem; background:rgba(0,0,0,0.2); border-radius:0.5rem;">
-                     ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `<div>${getStatusDot(n)} ${n}</div>`).join('')}
+                 <div style="padding:1rem; background:white; border-radius:1rem; border:1px solid var(--border-color); margin-bottom:1rem; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                     <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                         ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `
+                             <div style="display:flex; align-items:center; border-bottom:1px solid #f1f5f9; padding: 0.25rem 0;">
+                                 ${getStatusDot(n)} <span style="margin-left:0.5rem; color:var(--text-primary); font-size: 0.95rem;">${n}</span>
+                             </div>`).join('')}
+                     </div>
+                 </div>
+                 <!-- 凡例と説明 -->
+                 <div style="font-size:0.8rem; text-align:left; color:var(--text-secondary); margin-bottom:1.5rem; padding:0.5rem; border-left:3px solid var(--accent-color); background:rgba(14,165,233,0.05);">
+                    <div style="display:flex; gap:1rem; margin-bottom:0.5rem;">
+                        <span style="display:flex; align-items:center; gap:0.2rem;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--success-color); box-shadow:0 0 5px var(--success-color);"></span> 接続中</span>
+                        <span style="display:flex; align-items:center; gap:0.2rem;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--text-secondary);"></span> 未接続</span>
+                    </div>
+                    <p style="margin:0; border-bottom:1px solid rgba(0,0,0,0.05); padding-bottom:0.3rem; margin-bottom:0.3rem;">
+                        参加者全員のマークが <span style="display:inline-block; vertical-align:middle; width:8px; height:8px; border-radius:50%; background:var(--success-color); box-shadow:0 0 5px var(--success-color);"></span> 緑色（接続中）になるまでお待ちください。
+                    </p>
+                    <p style="margin:0; font-weight:bold; color:var(--accent-color);">2人以上集まったら開始できます。</p>
                  </div>
             ` : `
                 <select id="num-players-select" class="form-control">
@@ -257,8 +342,9 @@ function renderSetupScreen() {
     }
 
     document.getElementById('num-rounds-input').onchange = (e) => { GameState.numRounds = parseInt(e.target.value) || 5; };
-    document.getElementById('back-home-btn').onclick = () => { GameState.phase = 'connection'; render(); };
+    document.getElementById('back-home-btn').onclick = () => { Sound.tap(); GameState.phase = 'connection'; render(); };
     document.getElementById('start-btn').onclick = async () => {
+        Sound.tap();
         saveState();
         GameState.rosters = Array(GameState.numPlayers).fill(0).map(() => []);
         GameState.currentRound = 1; GameState.currentSubRound = 1;
@@ -275,7 +361,7 @@ function renderOfflineIntermission(nextIdx) {
     container.className = 'glass-panel';
     container.style.textAlign = 'center';
     container.style.padding = '3rem 1rem';
-    
+
     container.innerHTML = `
         <h2 style="color:var(--accent-color); font-size:1.8rem;">指名完了</h2>
         <p style="margin:2rem 0; font-size:1.2rem; color:var(--text-secondary);">デバイスを <strong>${GameState.playerNames[nextIdx]}</strong> さんに渡してください。</p>
@@ -291,11 +377,17 @@ function renderOfflineIntermission(nextIdx) {
 function renderDraftInputScreen() {
     const wasFocused = document.activeElement && document.activeElement.id === 'p-search';
     const lastSearch = document.getElementById('p-search') ? document.getElementById('p-search').value : (window._lastSearch || '');
+    const lastTeams = Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(cb => cb.value).length > 0 ?
+        Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(cb => cb.value) : (window._lastTeams || []);
+    const lastPos = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(cb => cb.value).length > 0 ?
+        Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(cb => cb.value) : (window._lastPos || []);
+    const lastSals = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked')).map(cb => cb.value).length > 0 ?
+        Array.from(document.querySelectorAll('.salary-filter-checkbox:checked')).map(cb => cb.value) : (window._lastSals || []);
 
     appContainer.innerHTML = '';
-    let myIdx = isOnline ? GameState.playerNames.indexOf(myPlayerName) : GameState.currentTurn;
+    let myIdx = isOnline ? GameState.playerNames.indexOf(myPlayerName) : GameState.playersToDraftThisRound[GameState.currentTurn];
     const hasSelected = isOnline ? (GameState.currentSelections[myIdx] != null) : false;
-    const inRound = isOnline ? GameState.playersToDraftThisRound.includes(myIdx) : true;
+    const inRound = isOnline ? GameState.playersToDraftThisRound.includes(myIdx) : (myIdx !== undefined);
     const container = document.createElement('div');
     container.className = 'glass-panel';
 
@@ -314,8 +406,13 @@ function renderDraftInputScreen() {
                         <div style="height:100%; width:${((total - unpicked.length) / total) * 100}%; background:var(--accent-color);"></div>
                     </div>
                 </div>
-                <div style="text-align:left;">
-                    ${GameState.playersToDraftThisRound.map(i => `<div>${getStatusDot(GameState.playerNames[i])} ${GameState.playerNames[i]} ${GameState.currentSelections[i] ? '✅' : '...'}</div>`).join('')}
+                <div style="text-align:left; display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem;">
+                    ${GameState.playersToDraftThisRound.map(i => `
+                        <div style="background:white; padding:0.8rem 1rem; border-radius:1rem; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; box-shadow:var(--pop-shadow);">
+                            <div style="display:flex; align-items:center;">${getStatusDot(GameState.playerNames[i])} <span style="font-weight:bold; color:var(--text-primary);">${GameState.playerNames[i]}</span></div>
+                            <span style="font-size:1.2rem;">${GameState.currentSelections[i] ? '✅' : '⏳'}</span>
+                        </div>
+                    `).join('')}
                 </div>
                 ${isHost && unpicked.length > 0 ? `
                     <div style="margin-top:2rem; border-top:1px solid var(--border-color); padding-top:1rem;">
@@ -343,80 +440,84 @@ function renderDraftInputScreen() {
             <span class="badge badge-accent">${roundText}</span>
         </div>
         
-        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 0.5rem; border: 1px solid var(--border-color); overflow-x: auto;">
+        <div class="filter-controls" style="display:flex; flex-direction:column; gap:0.5rem; margin-top: 1rem; overflow-x: auto;">
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">セ:</div>
+                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent-color); width:60px; flex-shrink:0;">セ・リーグ</div>
                 <div class="team-pills-container">
                     ${(GlobalTags.ceLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+        const style = getTeamColor(t);
+        const isChecked = lastTeams.includes(t) ? 'checked' : '';
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;" ${isChecked}>
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">パ:</div>
+                 <div style="font-size:0.75rem; font-weight:bold; color:var(--accent-color); width:60px; flex-shrink:0;">パ・リーグ</div>
                 <div class="team-pills-container">
                     ${(GlobalTags.paLeagueTeams || []).map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+        const style = getTeamColor(t);
+        const isChecked = lastTeams.includes(t) ? 'checked' : '';
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;" ${isChecked}>
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             ${(GlobalTags.otherTeams || []).length > 0 ? `
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">他:</div>
+                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent-color); width:60px; flex-shrink:0;">他チーム</div>
                 <div class="team-pills-container">
                     ${GlobalTags.otherTeams.map(t => {
-                        const style = getTeamColor(t);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
-                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;">
+        const style = getTeamColor(t);
+        const isChecked = lastTeams.includes(t) ? 'checked' : '';
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${t}" class="team-filter-checkbox" style="display:none;" ${isChecked}>
                             <span class="team-pill">${t}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             ` : ''}
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">位置:</div>
+                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent-color); width:60px; flex-shrink:0;">ポジション</div>
                 <div class="team-pills-container">
                     ${GlobalTags.positions.map(p => {
-                        const style = getPosColor(p);
-                        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
-                            <input type="checkbox" value="${p}" class="pos-filter-checkbox" style="display:none;">
+        const style = getPosColor(p);
+        const isChecked = lastPos.includes(p) ? 'checked' : '';
+        return `<label class="team-pill-label" style="--brand-bg:${style.bg}; --brand-fg:${style.fg};">
+                            <input type="checkbox" value="${p}" class="pos-filter-checkbox" style="display:none;" ${isChecked}>
                             <span class="team-pill">${p}</span>
                         </label>`;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <div style="font-size:0.7rem; color:var(--text-secondary); width:60px; flex-shrink:0;">年俸:</div>
+                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent-color); width:60px; flex-shrink:0;">年俸</div>
                 <div class="team-pills-container">
                     ${[
-                        { label: '~5000万', range: '0-5000' },
-                        { label: '5000万~1億', range: '5001-10000' },
-                        { label: '1億~3億', range: '10001-30000' },
-                        { label: '3億~', range: '30001-999999' }
-                    ].map(opt => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
-                        <input type="checkbox" value="${opt.range}" class="salary-filter-checkbox" style="display:none;">
+            { label: '~5000万', range: '0-5000' },
+            { label: '5000万~1億', range: '5001-10000' },
+            { label: '1億~3億', range: '10001-30000' },
+            { label: '3億~', range: '30001-999999' }
+        ].map(opt => `<label class="team-pill-label" style="--brand-bg:var(--accent-color); --brand-fg:#fff;">
+                        <input type="checkbox" value="${opt.range}" class="salary-filter-checkbox" style="display:none;" ${lastSals.includes(opt.range) ? 'checked' : ''}>
                         <span class="team-pill">${opt.label}</span>
                     </label>`).join('')}
                 </div>
             </div>
         </div>
 
-        <input type="text" id="p-search" class="form-control" placeholder="検索..." style="margin:1rem 0;">
-        <div id="sel-info" style="padding:1rem; background:rgba(0,0,0,0.2); border:1px dashed var(--border-color); border-radius:1rem; margin-bottom:1rem; min-height:60px;">
+        <input type="text" id="p-search" class="form-control" placeholder="選手を探す..." style="margin:1rem 0; box-shadow:var(--pop-shadow);">
+        <div id="sel-info" style="padding:1rem; background:#f1f5f9; border:1px solid var(--border-color); border-radius:1rem; margin-bottom:1rem; min-height:60px; box-shadow:inset 0 2px 4px rgba(0,0,0,0.02);">
             <p style="text-align:center; color:var(--text-secondary);">選手を選択してください</p>
         </div>
-        <div style="max-height:350px; overflow-y:auto; border:1px solid var(--border-color); border-radius:0.5rem;">
+        <div style="max-height:350px; overflow-y:auto; border:1px solid var(--border-color); border-radius:1rem; background:white; box-shadow:var(--pop-shadow);">
             <table class="player-table">
-                <thead style="position:sticky; top:0; background:var(--bg-card);"><tr><th>名前</th><th>球団</th><th>位置</th><th>年俸</th></tr></thead>
+                <thead style="position:sticky; top:0; background:#f8fafc; z-index:10;"><tr><th style="color:var(--accent-color);">名前</th><th style="color:var(--accent-color);">球団</th><th style="color:var(--accent-color);">位置</th><th style="color:var(--accent-color);">年俸</th></tr></thead>
                 <tbody id="p-list"></tbody>
             </table>
         </div>
@@ -454,10 +555,10 @@ function renderDraftInputScreen() {
                     p.position.toLowerCase().includes(lowerFilter);
             }
             return true;
-        }).slice(0, 50).forEach(p => {
+        }).slice(0, 500).forEach(p => {
             const tr = document.createElement('tr'); tr.className = 'player-row';
             if (selected && selected.id === p.id) tr.classList.add('selected');
-            tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td><td style="font-size:0.8rem;">${p.salary}万</td>`;
+            tr.innerHTML = `<td>${p.name}</td><td>${p.team}</td><td>${p.position}</td><td style="font-size:0.8rem;">${formatSalary(p.salary)}</td>`;
             tr.onclick = () => {
                 selected = p; draw(f);
                 info.innerHTML = `<h3>${p.name} <span style="font-size:0.8rem;">(${p.team})</span></h3>`;
@@ -468,11 +569,11 @@ function renderDraftInputScreen() {
     };
     const pSearch = document.getElementById('p-search');
     pSearch.oninput = (e) => draw(e.target.value);
-    
+
     // Restore search value and initial draw
     pSearch.value = lastSearch;
     draw(lastSearch);
-    
+
     pSearch.addEventListener('blur', (e) => { window._lastSearch = e.target.value; });
 
     if (wasFocused) {
@@ -481,7 +582,12 @@ function renderDraftInputScreen() {
     }
 
     document.querySelectorAll('.team-filter-checkbox, .pos-filter-checkbox, .salary-filter-checkbox').forEach(cb => {
-        cb.onchange = () => draw(pSearch.value);
+        cb.onchange = () => {
+            window._lastTeams = Array.from(document.querySelectorAll('.team-filter-checkbox:checked')).map(c => c.value);
+            window._lastPos = Array.from(document.querySelectorAll('.pos-filter-checkbox:checked')).map(c => c.value);
+            window._lastSals = Array.from(document.querySelectorAll('.salary-filter-checkbox:checked')).map(c => c.value);
+            draw(pSearch.value);
+        };
     });
 
     const finalizeFn = async (p) => {
@@ -502,10 +608,11 @@ function renderDraftInputScreen() {
             render();
         } else {
             // Offline turn-based logic with Intermission
-            GameState.currentSelections[GameState.currentTurn] = p;
-            if (GameState.currentTurn < GameState.numPlayers - 1) {
+            GameState.currentSelections[myIdx] = p;
+            if (GameState.currentTurn < GameState.playersToDraftThisRound.length - 1) {
                 GameState.currentTurn++;
-                renderOfflineIntermission(GameState.currentTurn);
+                const nextIdx = GameState.playersToDraftThisRound[GameState.currentTurn];
+                renderOfflineIntermission(nextIdx);
             } else {
                 GameState.phase = 'draft_reveal';
                 render();
@@ -513,8 +620,8 @@ function renderDraftInputScreen() {
         }
     };
 
-    btn.onclick = () => finalizeFn(selected);
-    document.getElementById('skip-btn').onclick = () => { if (confirm('パスしますか？')) finalizeFn({ id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true }); };
+    btn.onclick = () => { Sound.tap(); finalizeFn(selected); };
+    document.getElementById('skip-btn').onclick = () => { if (confirm('パスしますか？')) { Sound.tap(); finalizeFn({ id: 'skip-' + Date.now(), name: '（選択パス）', team: '-', position: '-', isSkip: true }); } };
 }
 
 function renderDraftRevealScreen() {
@@ -547,10 +654,12 @@ function renderDraftRevealScreen() {
         appContainer.appendChild(container);
 
         if (!isFinished) {
+            Sound.tick();
             setTimeout(render, 100);
         } else {
             const res = GameState.lotteryResults[al.playerId];
             if (res) {
+                Sound.win();
                 const winnerName = GameState.playerNames[res.winnerIndex];
                 document.getElementById('lottery-display').innerHTML = `<span class="lottery-winner-anim" style="color:var(--success-color)">交渉権獲得: ${winnerName}</span>`;
             }
@@ -608,7 +717,7 @@ function renderDraftRevealScreen() {
                 rDiv.innerHTML = `<span style="color:var(--success-color)">交渉権獲得: ${name}</span>`;
                 GameState.rosters[res.winnerIndex][GameState.currentRound - 1] = g.p;
                 GameState.availablePlayers = GameState.availablePlayers.filter(x => x.id !== g.p.id);
-            } else if (isHost) {
+            } else if (!isOnline || isHost) {
                 const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '抽選する';
                 rDiv.appendChild(b);
                 b.onclick = async () => {
@@ -641,6 +750,12 @@ function renderDraftRevealScreen() {
 
     const showProceed = () => {
         const box = document.getElementById('proceed-box');
+        if (!isOnline) {
+            const btn = document.createElement('button'); btn.className = 'btn btn-success'; btn.textContent = '次の指名へ進む';
+            btn.onclick = async () => { await advanceDraft(); render(); };
+            box.appendChild(btn);
+            return;
+        }
         const ok = GameState.confirmedPlayers[myPlayerName];
         if (!ok) {
             const btn = document.createElement('button'); btn.className = 'btn btn-success'; btn.textContent = 'OK (3秒待機)';
@@ -649,7 +764,21 @@ function renderDraftRevealScreen() {
             btn.onclick = fn; setTimeout(fn, 3000);
         } else {
             const un = GameState.playerNames.slice(0, GameState.numPlayers).filter(n => !GameState.confirmedPlayers[n]);
-            box.innerHTML = un.length ? `<p>他プレイヤー待機中: ${un.join(', ')}</p>` : '<p>次へ進みます...</p>';
+            if (un.length > 0) {
+                box.innerHTML = `
+                    <p style="color:var(--text-secondary); margin-bottom: 1rem;">他プレイヤーの確認を待っています...</p>
+                    <div style="display:flex; flex-direction:column; gap:0.5rem; max-width:300px; margin:0 auto;">
+                        ${GameState.playerNames.slice(0, GameState.numPlayers).map(n => `
+                            <div style="background:white; padding:0.5rem 1rem; border-radius:1rem; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; box-shadow:var(--pop-shadow);">
+                                <div style="display:flex; align-items:center; font-size:0.9rem;">${getStatusDot(n)} <span style="font-weight:bold; color:var(--text-primary);">${n}</span></div>
+                                <span>${GameState.confirmedPlayers[n] ? '✅' : '⏳'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                box.innerHTML = '<p>全員の確認が完了しました。次へ進みます...</p>';
+            }
         }
     };
     runRevealLogic();
@@ -662,7 +791,8 @@ function renderFinalResultScreen() {
 function render() {
     updateGlobalUI();
     const p = GameState.phase;
-    if (p === 'connection') renderConnectionScreen();
+    if (p === 'top') renderTopScreen();
+    else if (p === 'connection') renderConnectionScreen();
     else if (p === 'setup') renderSetupScreen();
     else if (p === 'draft_input') renderDraftInputScreen();
     else if (p === 'draft_reveal') renderDraftRevealScreen();

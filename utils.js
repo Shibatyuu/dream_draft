@@ -58,9 +58,9 @@ async function advanceDraft() {
 }
 
 function loadEmbeddedData() {
-    if (typeof PlayersData !== 'undefined') {
-        GameState.csvData = PlayersData;
-        GameState.availablePlayers = [...PlayersData];
+    if (typeof EMBEDDED_PLAYERS !== 'undefined') {
+        GameState.csvData = EMBEDDED_PLAYERS;
+        GameState.availablePlayers = [...EMBEDDED_PLAYERS];
         reconstructGlobalTags();
     }
 }
