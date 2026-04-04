@@ -40,7 +40,8 @@ async function sendClientAction(actionObj) {
 
 function startHostPolling() {
     if (hostActionInterval) clearInterval(hostActionInterval);
-    hostActionInterval = setInterval(async () => {
+
+    const hostPollOnce = async () => {
         try {
             const res = await fetch(SERVER_URL + '?path=/poll_actions', {
                 method: 'POST',
@@ -126,12 +127,16 @@ function startHostPolling() {
                 render();
             }
         } catch (e) { console.error('Host polling error', e); }
-    }, 3000);
+    };
+
+    hostActionInterval = setInterval(hostPollOnce, 3000);
+    window._hostPollOnce = hostPollOnce;
 }
 
 function startClientPolling() {
     if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
+
+    const clientPollOnce = async () => {
         try {
             const res = await fetch(SERVER_URL + '?path=/room&room_id=' + roomId);
             if (res.ok) {
@@ -182,5 +187,21 @@ function startClientPolling() {
             }
             if (isOnline && !isHost) sendClientAction({ type: 'ping', name: myPlayerName });
         } catch(e) {}
-    }, 3000);
+    };
+
+    pollInterval = setInterval(clientPollOnce, 3000);
+    window._clientPollOnce = clientPollOnce;
 }
+
+// タブが非アクティブ→アクティブに戻ったとき、即座に再同期する
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isOnline) {
+        console.log('[Sync] Tab became visible, triggering immediate sync...');
+        if (isHost && window._hostPollOnce) {
+            window._hostPollOnce();
+        } else if (!isHost && window._clientPollOnce) {
+            window._clientPollOnce();
+        }
+    }
+});
+

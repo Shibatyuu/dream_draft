@@ -391,6 +391,11 @@ function renderDraftInputScreen() {
     const container = document.createElement('div');
     container.className = 'glass-panel';
 
+    console.log('[DraftInput] myPlayerName:', myPlayerName, 'myIdx:', myIdx, 'hasSelected:', hasSelected, 'inRound:', inRound,
+        'playersToDraftThisRound:', JSON.stringify(GameState.playersToDraftThisRound),
+        'currentSelections keys:', Object.keys(GameState.currentSelections),
+        'isOnline:', isOnline, 'isHost:', isHost);
+
     let roundText = `第${GameState.currentRound}巡目 ${GameState.currentSubRound > 1 ? '(外れ' + (GameState.currentSubRound - 1) + ')' : ''}`;
 
     if (isOnline && (!inRound || hasSelected)) {
